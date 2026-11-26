@@ -166,3 +166,66 @@ test('enforces read/write allowlists, 2-step preview-then-confirm, and agent lau
   assert.deepEqual(worker.refusals, [])
   await worker.deactivate()
 })
+
+test('Create workspace goes through Orca: workspace.create for a new branch, agent.launch to reuse one', async () => {
+  const rows = [
+    {
+      id: 'proj-1::/home/dev/acme-app',
+      kind: 'worktree',
+      name: 'AcmeApp',
+      projectId: 'proj-1',
+      path: '/home/dev/acme-app',
+      branch: 'main',
+      hostId: 'local'
+    },
+    {
+      id: 'proj-1::/home/dev/orca/workspaces/acme-app/op-1428-fix-token-refresh',
+      kind: 'worktree',
+      name: 'op-1428-fix-token-refresh',
+      projectId: 'proj-1',
+      path: '/home/dev/orca/workspaces/acme-app/op-1428-fix-token-refresh',
+      branch: 'op-1428-fix-token-refresh',
+      hostId: 'local'
+    }
+  ]
+  const host = mockHost({
+    settings: { baseUrl: 'https://openproject.example.com', readProjects: '*', writeProjects: '*', defaultAgent: 'codex' },
+    secrets: { 'openproject.apiToken': 'opapi-secret-123' },
+    storage: { 'openproject.projects': sampleProjects, 'openproject.workPackages': sampleWorkPackages },
+    results: {
+      'workspace.list': { workspaces: rows, truncated: false },
+      'workspace.create': { workspaceId: 'proj-1::/new', terminalId: 'term-new' },
+      'agent.launch': { terminalId: 'term-reuse' },
+      'workspace.open': { opened: true }
+    }
+  })
+  const worker = await mountWorker(main, { host })
+
+  const created = await worker.request('openproject.agent.launch', {
+    ticketId: 1428,
+    agent: 'claude',
+    workspaceId: 'proj-1::/home/dev/acme-app',
+    createWorktree: true,
+    branchName: 'op-1428-new-branch'
+  })
+  const createCalls = worker.host.callsOf('workspace.create') as Array<Record<string, any>>
+  assert.equal(createCalls.length, 1)
+  const params = JSON.stringify(createCalls[0])
+  assert.ok(params.includes('"projectId":"proj-1"'))
+  assert.ok(params.includes('"name":"op-1428-new-branch"'))
+  assert.ok(params.includes('"agent":"claude"'))
+  assert.equal(created.workspaceId, 'proj-1::/new')
+  assert.equal(created.createdWorktree, true)
+
+  // The default branch for #1428 already has a worktree: reuse it instead of creating another.
+  const reused = await worker.request('openproject.agent.launch', {
+    ticketId: 1428,
+    agent: 'claude',
+    workspaceId: 'proj-1::/home/dev/acme-app',
+    createWorktree: true
+  })
+  assert.equal(worker.host.callsOf('workspace.create').length, 1)
+  assert.equal(reused.terminalId, 'term-reuse')
+  assert.equal(reused.workspaceId, 'proj-1::/home/dev/orca/workspaces/acme-app/op-1428-fix-token-refresh')
+  await worker.deactivate()
+})

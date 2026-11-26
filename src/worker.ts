@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
@@ -467,69 +466,6 @@ function inferRepoNameFromWorkspacePath(wsPath: string, fallbackName: string): s
   }
   const base = path.posix.basename(normalized.replace(/\/+$/, ''))
   return base || fallbackName
-}
-
-function resolveOrcaCliPath(): string {
-  const home = os.homedir()
-  const candidates: string[] = []
-  if (typeof process !== 'undefined' && process.platform === 'win32') {
-    const localAppData =
-      process.env?.LOCALAPPDATA || path.join(home, 'AppData', 'Local')
-    candidates.push(
-      path.join(localAppData, 'Programs', 'orca', 'resources', 'bin', 'orca.exe'),
-      path.join(home, 'AppData', 'Local', 'Programs', 'orca', 'resources', 'bin', 'orca.exe')
-    )
-  } else if (typeof process !== 'undefined' && process.platform === 'darwin') {
-    candidates.push(
-      '/Applications/Orca.app/Contents/Resources/bin/orca',
-      path.join(home, 'Applications', 'Orca.app', 'Contents', 'Resources', 'bin', 'orca')
-    )
-  }
-  candidates.push(
-    path.join(home, '.config', 'orca', 'linux-orca-cli-shim', 'orca'),
-    '/usr/local/bin/orca',
-    'orca'
-  )
-  for (const c of candidates) {
-    try {
-      if (c === 'orca' || fs.existsSync(c)) {
-        return c
-      }
-    } catch {
-      // Ignore inaccessible candidate path
-    }
-  }
-  return 'orca'
-}
-
-function runOrcaCliJson(args: string[]): Promise<Record<string, unknown> | null> {
-  const bin = resolveOrcaCliPath()
-  return new Promise((resolve) => {
-    execFile(
-      bin,
-      args,
-      { timeout: 25000, maxBuffer: 2 * 1024 * 1024 },
-      (err, stdout) => {
-        if (err && !stdout) {
-          resolve(null)
-          return
-        }
-        try {
-          const parsed = JSON.parse(String(stdout || '').trim()) as Record<
-            string,
-            unknown
-          >
-          if (parsed && parsed.ok === false) {
-            resolve(null)
-            return
-          }
-          resolve(parsed)
-        } catch {
-          resolve(null)
-        }
-      }
-    )
-  })
 }
 
 function isWorktreeWorkspacePath(wsPath: string): boolean {
@@ -2075,199 +2011,77 @@ export default function activate(orca: OrcaWorkerApi): void {
     let terminalId = ''
     let createdWorktree = false
     let focused = false
+    let launchedWorkspaceId = workspaceId
+    let launchedWorkspaceName = workspaceName
 
-    const wsPath = matchedWs?.path || ''
-    if (wsPath && fs.existsSync(wsPath)) {
-      if (input.createWorktree === true) {
-        // Check if a worktree for this branchSlug already exists in the same repository
-        const targetRepoKey = (
-          matchedWs?.repoId ||
-          matchedWs?.repoName ||
-          ''
-        ).toLowerCase()
-        const existingBranchWt = workspaces.find((w) => {
-          const sameRepo =
-            !targetRepoKey ||
-            (w.repoId || w.repoName || '').toLowerCase() === targetRepoKey
-          const branchClean = (w.branch || '').replace(/^refs\/heads\//, '')
-          const normPath = (w.path || '').replace(/\\/g, '/')
-          return (
-            sameRepo &&
-            (w.name === branchSlug ||
-              branchClean === branchSlug ||
-              normPath.endsWith(`/${branchSlug}`))
-          )
-        })
+    // Everything goes through Orca's plugin API, so Orca's own error reaches the person.
+    const listed = await orca.host.call('workspace.list', {})
+    const rows = Array.isArray(listed?.workspaces) ? listed.workspaces : []
+    const targetRow = rows.find((r) => r.id === workspaceId)
 
-        if (existingBranchWt?.path && fs.existsSync(existingBranchWt.path)) {
-          const reuseRes = (await runOrcaCliJson([
-            'agent',
-            'launch',
-            '--agent',
-            agent,
-            '--worktree',
-            `path:${existingBranchWt.path}`,
-            '--prompt',
-            prompt,
-            '--focus',
-            '--json'
-          ])) as {
-            result?: {
-              launch?: { outcome?: { handle?: string } }
-              terminal?: { handle?: string }
-              terminalId?: string
-            }
-          } | null
-          const reuseHandle =
-            reuseRes?.result?.launch?.outcome?.handle ||
-            reuseRes?.result?.terminal?.handle ||
-            reuseRes?.result?.terminalId ||
-            ''
-          if (reuseHandle) {
-            terminalId = reuseHandle
-            focused = true
-            if (reuseHandle.startsWith('term_')) {
-              await runOrcaCliJson([
-                'terminal',
-                'switch',
-                '--terminal',
-                reuseHandle,
-                '--json'
-              ])
-            }
-          }
-        }
-
-        if (!terminalId) {
-          // Resolve the primary repository checkout or repo name so creating a worktree succeeds even when a child worktree was selected
-          const mainRepoWs =
-            workspaces.find(
-              (w) =>
-                w.isMainWorktree &&
-                (w.repoName || '').toLowerCase() ===
-                  (matchedWs?.repoName || '').toLowerCase()
-            ) ?? matchedWs
-          const repoId =
-            mainRepoWs?.repoId ||
-            matchedWs?.repoId ||
-            (mainRepoWs?.id?.includes('::')
-              ? mainRepoWs.id.split('::')[0]
-              : '') ||
-            (matchedWs?.id?.includes('::') ? matchedWs.id.split('::')[0] : '')
-          const repoRootPath = mainRepoWs?.path || wsPath
-          const repoSelector = repoId
-            ? `id:${repoId}`
-            : mainRepoWs?.isMainWorktree && repoRootPath
-              ? `path:${repoRootPath}`
-              : matchedWs?.repoName
-                ? `name:${matchedWs.repoName}`
-                : `path:${wsPath}`
-          const wtRes = (await runOrcaCliJson([
-            'worktree',
-            'create',
-            '--repo',
-            repoSelector,
-            '--name',
-            branchSlug,
-            '--branch',
-            branchSlug,
-            '--no-parent',
-            '--agent',
-            agent,
-            '--prompt',
-            prompt,
-            '--activate',
-            '--json'
-          ])) as {
-            result?: {
-              launch?: { outcome?: { handle?: string } }
-              agentTerminalHandle?: string
-              worktree?: { id?: string }
-            }
-          } | null
-          const wtHandle =
-            wtRes?.result?.launch?.outcome?.handle ||
-            wtRes?.result?.agentTerminalHandle ||
-            wtRes?.result?.worktree?.id ||
-            ''
-          if (wtHandle) {
-            terminalId = wtHandle
-            createdWorktree = true
-            focused = true
-            if (wtHandle.startsWith('term_')) {
-              await runOrcaCliJson([
-                'terminal',
-                'switch',
-                '--terminal',
-                wtHandle,
-                '--json'
-              ])
-            }
-          }
-        }
-      } else {
-        const cliLaunchRes = (await runOrcaCliJson([
-          'agent',
-          'launch',
-          '--agent',
-          agent,
-          '--worktree',
-          `path:${wsPath}`,
-          '--prompt',
-          prompt,
-          '--focus',
-          '--json'
-        ])) as {
-          result?: {
-            launch?: { outcome?: { handle?: string } }
-            terminal?: { handle?: string }
-            terminalId?: string
-          }
-        } | null
-        const cliHandle =
-          cliLaunchRes?.result?.launch?.outcome?.handle ||
-          cliLaunchRes?.result?.terminal?.handle ||
-          cliLaunchRes?.result?.terminalId ||
-          ''
-        if (cliHandle) {
-          terminalId = cliHandle
-          focused = true
-          if (cliHandle.startsWith('term_')) {
-            await runOrcaCliJson([
-              'terminal',
-              'switch',
-              '--terminal',
-              cliHandle,
-              '--json'
-            ])
-          }
-        }
+    /** Shows a workspace in Orca; needs `workspace:write`, so a refusal only skips the focus. */
+    const show = async (id: string) => {
+      try {
+        await orca.host.call('workspace.open', { workspaceId: id })
+        focused = true
+      } catch {
+        // Started in the background; the person can switch to it from the sidebar.
       }
-    } else if (!terminalId) {
-      // Only fall back to host RPC when workspace path does not exist on disk (e.g. unit test mocks / remote host)
-      const launchRes = await orca.host.call('agent.launch', {
-        workspaceId,
-        agent,
-        prompt
-      })
-      terminalId = launchRes.terminalId
     }
 
-    if (!terminalId) {
-      throw new Error(
-        `Failed to launch ${agent} in ${workspaceName}. Please verify that ${agent} is installed and accessible.`
+    if (input.createWorktree === true) {
+      if (!targetRow?.projectId) {
+        throw new Error(
+          `Cannot create a workspace: "${workspaceName}" does not belong to a Git project Orca knows. Pick a repository in the form.`
+        )
+      }
+      // Reuse a worktree that already has this branch in the same project.
+      const existing = rows.find(
+        (r) =>
+          r.projectId === targetRow.projectId &&
+          r.kind === 'worktree' &&
+          ((r.branch ?? '').replace(/^refs\/heads\//, '') === branchSlug || r.name === branchSlug)
       )
+      if (existing) {
+        const res = await orca.host.call('agent.launch', { workspaceId: existing.id, agent, prompt })
+        terminalId = res.terminalId
+        launchedWorkspaceId = existing.id
+        launchedWorkspaceName = existing.name
+        await show(existing.id)
+      } else {
+        const res = await orca.host.call('workspace.create', {
+          projectId: targetRow.projectId,
+          ...(targetRow.hostId ? { hostId: targetRow.hostId } : {}),
+          name: branchSlug,
+          agent,
+          prompt,
+          open: true
+        })
+        launchedWorkspaceId = res.workspaceId
+        launchedWorkspaceName = branchSlug
+        terminalId = res.terminalId ?? ''
+        createdWorktree = true
+        focused = true
+      }
+    } else {
+      const res = await orca.host.call('agent.launch', { workspaceId, agent, prompt })
+      terminalId = res.terminalId
+      await show(workspaceId)
+    }
+
+    if (!terminalId && !createdWorktree) {
+      throw new Error(`Orca did not start ${agent} in ${launchedWorkspaceName}.`)
     }
 
     await orca.host.call('notifications.show', {
       title: `Started ${agent} on #${ticket.id}`,
-      body: `${ticket.subject} (${workspaceName}${createdWorktree ? ` · ${branchSlug}` : ''})`
+      body: `${ticket.subject} (${launchedWorkspaceName}${createdWorktree ? ` · ${branchSlug}` : ''})`
     })
 
     return {
       terminalId,
-      workspaceId,
-      workspaceName,
+      workspaceId: launchedWorkspaceId,
+      workspaceName: launchedWorkspaceName,
       branchSlug,
       agent,
       createdWorktree,

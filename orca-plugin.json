@@ -139,6 +139,12 @@
     },
     {
       "kind": "notifications:show"
+    },
+    {
+      "kind": "workspace:create"
+    },
+    {
+      "kind": "workspace:write"
     }
   ]
 }
