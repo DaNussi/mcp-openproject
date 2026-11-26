@@ -555,19 +555,11 @@ function renderTicket(ticket: OpenProjectWorkPackage): string {
   let body = ''
   if (state.detailTab === 'overview') {
     body = `
-      <div class="section-title">${esc(tr('ticket.description'))}</div>
-      ${ticket.description ? `<div class="md">${renderMarkdown(ticket.description)}</div>` : `<div class="muted">${esc(tr('detail.noDescription'))}</div>`}
       <div class="section-title">${esc(tr('detail.sectionPeople'))}</div>
       <dl class="kv"><dt>${esc(tr('ticket.assignee'))}</dt><dd>${person(ticket.assignee)}</dd>
         <dt>${esc(tr('ticket.responsible'))}</dt><dd>${person(ticket.responsible)}</dd></dl>
-      <div class="section-title">${esc(tr('detail.sectionDetails'))}</div>
-      <dl class="kv">
-        <dt>${esc(tr('detail.type'))}</dt><dd>${typeLabel(ticket)}</dd>
-        <dt>${esc(tr('detail.status'))}</dt><dd>${statusPill(ticket.status, statusHex)}</dd>
-        <dt>${esc(tr('detail.priority'))}</dt><dd>${priorityLabel(ticket.priority, prioHex)}</dd>
-        <dt>${esc(tr('detail.project'))}</dt><dd>${esc(ticket.project)}</dd>
-        <dt>${esc(tr('detail.updated'))}</dt><dd>${esc(ticket.updatedAt ? formatShortDate(ticket.updatedAt) : '—')}</dd>
-      </dl>`
+      <div class="section-title">${esc(tr('ticket.description'))}</div>
+      ${ticket.description ? `<div class="md">${renderMarkdown(ticket.description)}</div>` : `<div class="muted">${esc(tr('detail.noDescription'))}</div>`}`
   } else if (state.detailTab === 'activity') {
     const items = [...activities]
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -588,10 +580,17 @@ function renderTicket(ticket: OpenProjectWorkPackage): string {
       ${children.length ? `<div class="rel-list">${children.map((c) => relItem(c, '↳')).join('')}</div>` : `<div class="muted">${esc(tr('detail.noChildren'))}</div>`}`
   }
 
+  const back =
+    state.prefs.mode === 'popover'
+      ? `<div><button class="btn ghost back" data-action="back">← ${esc(tr('detail.backToList'))}</button></div>`
+      : ''
+
   return `<div class="ticket">
+    ${back}
     <div class="ticket-head">
       <div class="meta">
         <div class="line1">${typeLabel(ticket)} ${idLink(ticket.id)}
+          ${ticket.project ? `<span class="muted">· ${esc(ticket.project)}</span>` : ''}
           ${ticket.parentId ? `<span class="parent muted">· ↑ <a href="#" data-action="open-ticket" data-id="${ticket.parentId}">#${ticket.parentId}${parentSubject ? ` ${esc(parentSubject)}` : ''}</a></span>` : ''}
         </div>
         <div class="line1">${statusPill(ticket.status, statusHex)} ${priorityLabel(ticket.priority, prioHex)}
@@ -759,6 +758,9 @@ app.addEventListener('click', (event) => {
     case 'close-ticket':
       closeTicket()
       return
+    case 'back':
+      state.tab = 'tickets'
+      break
     case 'tab':
       state.tab = el.dataset.tab as MainTab
       break

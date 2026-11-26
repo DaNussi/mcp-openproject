@@ -142,5 +142,6 @@ export const VI_LOCALE: Record<string, string> = {
   'mode.dragHint': 'Kéo để đổi kích thước',
   'detail.emptyTitle': 'Chưa chọn work package',
   'detail.emptyHint': 'Chọn một work package trong bảng để xem ở đây.',
-  'wp.colAssignee': 'Assignee'
+  'wp.colAssignee': 'Assignee',
+  'detail.backToList': 'Quay lại danh sách'
 }

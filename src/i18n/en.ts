@@ -142,5 +142,6 @@ export const EN_LOCALE: Record<string, string> = {
   'mode.dragHint': 'Drag to resize',
   'detail.emptyTitle': 'No work package selected',
   'detail.emptyHint': 'Select a work package in the table to see it here.',
-  'wp.colAssignee': 'Assignee'
+  'wp.colAssignee': 'Assignee',
+  'detail.backToList': 'Back to list'
 }
