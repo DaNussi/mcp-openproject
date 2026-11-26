@@ -1,5 +1,7 @@
 import {
+  Box,
   Button,
+  IconButton,
   Callout,
   Card,
   EmptyState,
@@ -8,7 +10,6 @@ import {
   Row,
   set,
   Spinner,
-  Stack,
   Tab,
   Tabs,
   Text,
@@ -28,6 +29,10 @@ import {
   activeTabAtom,
   changePageSize,
   feedbackMessageAtom,
+  LIST_HEIGHT_MAX,
+  LIST_HEIGHT_MIN,
+  LIST_HEIGHT_STEP,
+  listHeightAtom,
   filterPanelOpenAtom,
   localeAtom,
   pageSizeAtom,
@@ -253,6 +258,12 @@ export default function Panel() {
     (nextPageSize !== undefined && allWorkPackages.length >= pageLimit)
 
   const detailOpen = Boolean(selectedTicket && ticketDetailExpanded)
+  const listHeight = read(listHeightAtom)
+  const stepListHeight = (delta: number) =>
+    set(
+      listHeightAtom,
+      Math.min(LIST_HEIGHT_MAX, Math.max(LIST_HEIGHT_MIN, listHeight + delta))
+    )
 
   const listBody =
     snapshot === null ? (
@@ -277,7 +288,7 @@ export default function Panel() {
         rows: visible,
         baseUrl: snapshot.config.baseUrl,
         selectedId: detailOpen && selectedTicket ? selectedTicket.id : null,
-        compact: detailOpen,
+        height: detailOpen ? listHeight : LIST_HEIGHT_MAX,
         hasMore,
         onLoadMore: () => {
           if (nextPageSize) void changePageSize(nextPageSize)
@@ -286,7 +297,7 @@ export default function Panel() {
     )
 
   return (
-    <Stack gap="sm">
+    <Box direction="column" gap="sm">
       {WorkPackageHeader({
         locale,
         snapshot,
@@ -313,7 +324,7 @@ export default function Panel() {
         onChange={(nextTab) => set(activeTabAtom, nextTab)}
       >
         <Tab value="tickets" label={tr('tabs.tickets')}>
-          <Stack gap="sm">
+          <Box direction="column" gap="sm">
             {WorkPackageToolbar({
               locale,
               view,
@@ -333,6 +344,29 @@ export default function Panel() {
 
             {listBody}
 
+            {detailOpen && selectedTicket ? (
+              <Box direction="row" justify="center" gap="xs">
+                <IconButton
+                  size="xs"
+                  variant="ghost"
+                  icon="collapse"
+                  label={tr('detail.shrinkList')}
+                  tooltip={tr('detail.shrinkList')}
+                  disabled={listHeight <= LIST_HEIGHT_MIN}
+                  onPress={() => stepListHeight(-LIST_HEIGHT_STEP)}
+                />
+                <IconButton
+                  size="xs"
+                  variant="ghost"
+                  icon="expand"
+                  label={tr('detail.growList')}
+                  tooltip={tr('detail.growList')}
+                  disabled={listHeight >= LIST_HEIGHT_MAX}
+                  onPress={() => stepListHeight(LIST_HEIGHT_STEP)}
+                />
+              </Box>
+            ) : null}
+
             {detailOpen && selectedTicket
               ? TicketDetailView({
                   locale,
@@ -344,7 +378,7 @@ export default function Panel() {
                   detectedAgents
                 })
               : null}
-          </Stack>
+          </Box>
         </Tab>
 
         <Tab value="create" label={tr('tabs.newTask')} disabled={!canCreateAnyTask}>
@@ -362,6 +396,6 @@ export default function Panel() {
           {SetupView({ locale, snapshot, detectedAgents })}
         </Tab>
       </Tabs>
-    </Stack>
+    </Box>
   )
 }

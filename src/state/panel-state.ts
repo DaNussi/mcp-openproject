@@ -47,6 +47,13 @@ export const tableSortAtom = atom<{
   column: string
   direction: 'asc' | 'desc'
 } | null>('openproject.tableSort', null, { persist: 'plugin' })
+/** Height in px of the work package list while the details pane is open (the divider buttons step it). */
+export const LIST_HEIGHT_MIN = 120
+export const LIST_HEIGHT_MAX = 720
+export const LIST_HEIGHT_STEP = 80
+export const listHeightAtom = atom<number>('openproject.listHeight', 280, {
+  persist: 'plugin'
+})
 export const targetWorkspaceIdAtom = atom<string>('')
 export const launchPanelOpenAtom = atom<boolean>(false)
 /** Creating a workspace for the ticket is the main use case, so a new worktree is the default. */

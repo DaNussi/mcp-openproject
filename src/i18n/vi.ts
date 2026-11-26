@@ -127,5 +127,11 @@ export const VI_LOCALE: Record<string, string> = {
   'wp.sort.type:asc': 'Loại',
   'wp.sort.status:asc': 'Status',
   'wp.sort.priority:desc': 'Priority (cao nhất trước)',
-  'wp.sort.assignee:asc': 'Assignee'
+  'wp.sort.assignee:asc': 'Assignee',
+  'wp.colId': 'ID',
+  'wp.colType': 'Loại',
+  'wp.colSubject': 'Tiêu đề',
+  'wp.colStatus': 'Status',
+  'detail.growList': 'Hiện thêm danh sách',
+  'detail.shrinkList': 'Hiện thêm chi tiết'
 }

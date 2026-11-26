@@ -110,73 +110,83 @@ export function TicketDetailView({
   )
 
   return (
-    <Box border="neutral" background="card" radius="md" padding="sm">
+    <Box
+      border="neutral"
+      background="card"
+      radius="md"
+      padding="sm"
+      minHeight={480}
+    >
       <Stack gap="sm">
-        <Row justify="between" align="center" gap="xs">
-          <Row gap="xs" align="center">
-            <Text size="xs" weight="semibold" tone={typeTone}>
-              {(ticket.type || 'Task').toUpperCase()}
-            </Text>
-            {openExternal ? (
-              <Text size="xs">
-                <Link onPress={openExternal}>{`#${ticket.id}`}</Link>
-              </Text>
-            ) : (
-              <Text size="xs" muted>{`#${ticket.id}`}</Text>
-            )}
-          </Row>
-          <Row gap="xs" align="center">
-            {openExternal ? (
+        <Box direction="row" align="start" justify="between" gap="sm">
+          <Box grow minWidth={0}>
+            <Stack gap="xs">
+              <Row gap="xs" align="center">
+                <Text size="xs" weight="semibold" tone={typeTone}>
+                  {(ticket.type || 'Task').toUpperCase()}
+                </Text>
+                {openExternal ? (
+                  <Text size="xs">
+                    <Link onPress={openExternal}>{`#${ticket.id}`}</Link>
+                  </Text>
+                ) : (
+                  <Text size="xs" muted>{`#${ticket.id}`}</Text>
+                )}
+                {ticket.parentId ? (
+                  <Text size="xs" muted truncate>
+                    {'· ↑ '}
+                    <Link onPress={() => selectTicket(ticket.parentId!)}>
+                      {parentSubject
+                        ? `#${ticket.parentId} ${parentSubject}`
+                        : `#${ticket.parentId}`}
+                    </Link>
+                  </Text>
+                ) : null}
+              </Row>
+              <Heading level={2}>{ticket.subject}</Heading>
+              <Row gap="xs" align="center" wrap>
+                <Badge tone={statusTone}>{ticket.status}</Badge>
+                {ticket.priority ? <Badge tone={prioTone}>{ticket.priority}</Badge> : null}
+                {ticket.updatedAt ? (
+                  <Text size="xs" muted>
+                    {tr('detail.updatedOn', { date: formatShortDate(ticket.updatedAt) })}
+                  </Text>
+                ) : null}
+              </Row>
+            </Stack>
+          </Box>
+          <Box shrink={false} align="end" gap="xs">
+            <Row gap="xs" align="center">
+              {openExternal ? (
+                <IconButton
+                  size="xs"
+                  variant="ghost"
+                  icon="open-external"
+                  label={tr('detail.openInOpenProject')}
+                  tooltip={tr('detail.openInOpenProject')}
+                  onPress={openExternal}
+                />
+              ) : null}
               <IconButton
                 size="xs"
                 variant="ghost"
-                icon="open-external"
-                label={tr('detail.openInOpenProject')}
-                tooltip={tr('detail.openInOpenProject')}
-                onPress={openExternal}
+                icon="close"
+                label={tr('ticket.close')}
+                tooltip={tr('ticket.close')}
+                onPress={() => set(ticketDetailExpandedAtom, false)}
               />
-            ) : null}
-            <IconButton
-              size="xs"
-              variant="ghost"
-              icon="close"
-              label={tr('ticket.close')}
-              tooltip={tr('ticket.close')}
-              onPress={() => set(ticketDetailExpandedAtom, false)}
-            />
-          </Row>
-        </Row>
-
-        {ticket.parentId ? (
-          <Text size="xs" muted>
-            {'↑ '}
-            <Link onPress={() => selectTicket(ticket.parentId!)}>
-              {parentSubject ? `#${ticket.parentId} ${parentSubject}` : `#${ticket.parentId}`}
-            </Link>
-          </Text>
-        ) : null}
-
-        <Heading level={2}>{ticket.subject}</Heading>
-
-        <Row gap="xs" align="center" wrap>
-          <Badge tone={statusTone}>{ticket.status}</Badge>
-          {ticket.priority ? <Badge tone={prioTone}>{ticket.priority}</Badge> : null}
-          {ticket.updatedAt ? (
-            <Text size="xs" muted>
-              {tr('detail.updatedOn', { date: formatShortDate(ticket.updatedAt) })}
-            </Text>
-          ) : null}
-        </Row>
-
-        <Button
-          size="sm"
-          icon="branch"
-          tone="accent"
-          variant={launchPanelOpen ? 'outline' : 'solid'}
-          onPress={() => set(launchPanelOpenAtom, !launchPanelOpen)}
-        >
-          {tr('ticket.launchAgent')}
-        </Button>
+            </Row>
+            <Button
+              size="sm"
+              icon="branch"
+              tone="accent"
+              variant={launchPanelOpen ? 'outline' : 'solid'}
+              onPress={() => set(launchPanelOpenAtom, !launchPanelOpen)}
+            >
+              {tr('ticket.launchAgent')}
+            </Button>
+          </Box>
+        </Box>
 
         {launchPanelOpen
           ? LaunchAgentDrawer({ locale, ticket, workspaces, detectedAgents })
@@ -192,7 +202,7 @@ export function TicketDetailView({
               <Stack gap="xs">
                 {SectionTitle(tr('ticket.description'))}
                 {ticket.description ? (
-                  <Box maxHeight={320} scroll="y" padding="xs">
+                  <Box padding="xs">
                     <Markdown content={ticket.description} />
                   </Box>
                 ) : (

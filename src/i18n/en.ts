@@ -127,5 +127,11 @@ export const EN_LOCALE: Record<string, string> = {
   'wp.sort.type:asc': 'Type',
   'wp.sort.status:asc': 'Status',
   'wp.sort.priority:desc': 'Priority (highest first)',
-  'wp.sort.assignee:asc': 'Assignee'
+  'wp.sort.assignee:asc': 'Assignee',
+  'wp.colId': 'ID',
+  'wp.colType': 'Type',
+  'wp.colSubject': 'Subject',
+  'wp.colStatus': 'Status',
+  'detail.growList': 'Show more of the list',
+  'detail.shrinkList': 'Show more details'
 }

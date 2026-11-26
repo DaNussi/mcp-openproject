@@ -5,18 +5,14 @@ import {
   Link,
   List,
   ListItem,
-  Row,
+  Separator,
   shell,
   Stack,
   Text
 } from 'orca'
 import { createTranslator, type UiLocale } from '../i18n'
 import { selectTicket } from '../state/panel-state'
-import {
-  getPriorityToneStyle,
-  getStatusToneStyle,
-  getTypeToneStyle
-} from '../utils/openproject-tones'
+import { getStatusToneStyle, getTypeToneStyle } from '../utils/openproject-tones'
 import { type OrderedWorkPackage, workPackageUrl } from '../utils/work-package-table'
 
 export interface WorkPackageListProps {
@@ -24,16 +20,30 @@ export interface WorkPackageListProps {
   rows: OrderedWorkPackage[]
   baseUrl: string
   selectedId: number | null
-  compact: boolean
+  /** List height in px; the rows scroll inside it. */
+  height: number
   hasMore: boolean
   onLoadMore: () => void
 }
 
+const ID_WIDTH = 64
+const TYPE_WIDTH = 88
+const STATUS_WIDTH = 116
 const INDENT = '  '
 
+function HeaderCell(label: string, width?: number) {
+  return (
+    <Box width={width} grow={width === undefined} shrink={false}>
+      <Text size="xs" weight="semibold" muted truncate>
+        {label.toUpperCase()}
+      </Text>
+    </Box>
+  )
+}
+
 /**
- * OpenProject-style work package rows: the #ID opens the work package in OpenProject, the rest of
- * the row opens it here. Type is colored like OpenProject's type label, status as a colored badge.
+ * OpenProject's work package table: ID | TYPE | SUBJECT | STATUS. The ID opens the work package
+ * in OpenProject; the subject opens it in the details pane. Type and status carry their colors.
  */
 export function WorkPackageList(props: WorkPackageListProps) {
   const tr = createTranslator(props.locale)
@@ -42,82 +52,84 @@ export function WorkPackageList(props: WorkPackageListProps) {
     <Box
       border="neutral"
       radius="sm"
-      maxHeight={props.compact ? 280 : 640}
-      scroll="y"
+      direction="column"
+      height={props.height}
     >
-      <Stack gap="none">
-        {props.rows.map(({ wp, depth }) => {
-          const url = workPackageUrl(props.baseUrl, wp.id)
-          const typeTone = getTypeToneStyle(wp.type, wp.typeColor).textTone
-          const statusTone = getStatusToneStyle(wp.status, wp.statusColor).border
-          const prioTone = getPriorityToneStyle(wp.priority, wp.priorityColor).textTone
-          const assignee =
-            wp.assignee && wp.assignee !== 'Unassigned' ? wp.assignee : tr('filters.unassigned')
-          const isSelected = props.selectedId === wp.id
-          return (
-            <Box
-              key={String(wp.id)}
-              direction="row"
-              align="center"
-              gap="xs"
-              paddingX="xs"
-              background={isSelected ? 'accent' : 'none'}
-            >
-              <Box width={58} shrink={false}>
-                {url ? (
-                  <Text size="xs" weight="medium">
-                    <Link
-                      onPress={() => {
-                        void shell.openExternal(url)
-                      }}
-                    >
-                      {`#${wp.id}`}
-                    </Link>
-                  </Text>
-                ) : (
-                  <Text size="xs" muted>{`#${wp.id}`}</Text>
-                )}
-              </Box>
-              <Box grow>
-                <List label={`#${wp.id}`}>
-                  <ListItem
-                    key={String(wp.id)}
-                    current={isSelected}
-                    title={
-                      depth > 0
-                        ? `${INDENT.repeat(depth - 1)}└ ${wp.subject}`
-                        : wp.subject
-                    }
-                    onPress={() => selectTicket(wp.id)}
-                  >
-                    <Row gap="xs" align="center" wrap>
-                      <Text size="xs" weight="semibold" tone={typeTone}>
-                        {(wp.type || 'Task').toUpperCase()}
+      <Box direction="row" align="center" gap="xs" paddingX="sm" paddingY="xs" background="muted">
+        {HeaderCell(tr('wp.colId'), ID_WIDTH)}
+        {HeaderCell(tr('wp.colType'), TYPE_WIDTH)}
+        {HeaderCell(tr('wp.colSubject'))}
+        {HeaderCell(tr('wp.colStatus'), STATUS_WIDTH)}
+      </Box>
+      <Box scroll="y" height={Math.max(props.height - 34, 60)}>
+        <Stack gap="none">
+          {props.rows.map(({ wp, depth }, index) => {
+            const url = workPackageUrl(props.baseUrl, wp.id)
+            const typeTone = getTypeToneStyle(wp.type, wp.typeColor).textTone
+            const statusTone = getStatusToneStyle(wp.status, wp.statusColor).border
+            const isSelected = props.selectedId === wp.id
+            return (
+              <Stack key={String(wp.id)} gap="none">
+                {index > 0 ? <Separator /> : null}
+                <Box
+                  direction="row"
+                  align="center"
+                  gap="xs"
+                  paddingX="sm"
+                  background={isSelected ? 'accent' : 'none'}
+                >
+                  <Box width={ID_WIDTH} shrink={false}>
+                    {url ? (
+                      <Text size="xs" weight="medium">
+                        <Link
+                          onPress={() => {
+                            void shell.openExternal(url)
+                          }}
+                        >
+                          {String(wp.id)}
+                        </Link>
                       </Text>
-                      <Badge tone={statusTone}>{wp.status}</Badge>
-                      {wp.priority ? (
-                        <Text size="xs" tone={prioTone}>
-                          {wp.priority}
-                        </Text>
-                      ) : null}
-                      <Text size="xs" muted truncate>
-                        {assignee}
+                    ) : (
+                      <Text size="xs" muted>
+                        {String(wp.id)}
                       </Text>
-                    </Row>
-                  </ListItem>
-                </List>
-              </Box>
+                    )}
+                  </Box>
+                  <Box width={TYPE_WIDTH} shrink={false}>
+                    <Text size="xs" weight="semibold" tone={typeTone} truncate>
+                      {(wp.type || 'Task').toUpperCase()}
+                    </Text>
+                  </Box>
+                  <Box grow minWidth={0}>
+                    <List label={`#${wp.id}`}>
+                      <ListItem
+                        key={String(wp.id)}
+                        current={isSelected}
+                        title={
+                          depth > 0
+                            ? `${INDENT.repeat(depth - 1)}└ ${wp.subject}`
+                            : wp.subject
+                        }
+                        onPress={() => selectTicket(wp.id)}
+                      />
+                    </List>
+                  </Box>
+                  <Box width={STATUS_WIDTH} shrink={false}>
+                    <Badge tone={statusTone}>{wp.status}</Badge>
+                  </Box>
+                </Box>
+              </Stack>
+            )
+          })}
+          {props.hasMore ? (
+            <Box padding="xs">
+              <Button size="xs" variant="ghost" icon="expand" onPress={props.onLoadMore}>
+                {tr('wp.loadMore')}
+              </Button>
             </Box>
-          )
-        })}
-        {props.hasMore ? (
-          <Box padding="xs">
-            <Button size="xs" variant="ghost" icon="expand" onPress={props.onLoadMore}>
-              {tr('wp.loadMore')}
-            </Button>
-          </Box>
-        ) : null}
-      </Stack>
+          ) : null}
+        </Stack>
+      </Box>
     </Box>
   )
 }
