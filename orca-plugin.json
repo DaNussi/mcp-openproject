@@ -4,6 +4,7 @@
   "name": "OpenProject MCP for Orca",
   "version": "0.1.4",
   "description": "Community-built Orca sidebar and Rust MCP integration for OpenProject CE, with guarded ticket writes.",
+  "icon": "assets/icon.png",
   "cover": {
     "path": "assets/cover.png",
     "alt": "Illustration of the OpenProject MCP for Orca ticket panel using synthetic demo tasks"
@@ -14,7 +15,7 @@
   },
   "license": "MIT",
   "engines": {
-    "orca": ">=1.4.259"
+    "orca": ">=1.4.274"
   },
   "execution": "trusted-worker",
   "pluginApi": 1,
@@ -24,7 +25,10 @@
       {
         "id": "openproject",
         "title": "OpenProject",
-        "icon": "blocks",
+        "icon": {
+          "path": "M5 3h6a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M6 8h4 M6 11h4 M6 14h2.5 M21 6a2 2 0 1 1-4 0a2 2 0 1 1 4 0 M21 18a2 2 0 1 1-4 0a2 2 0 1 1 4 0 M19 8v8 M13 12h2a4 4 0 0 0 4-4",
+          "mode": "stroke"
+        },
         "entry": "src/ui/main.ts",
         "ui": "html"
       }
@@ -45,7 +49,7 @@
       {
         "id": "openproject-status",
         "text": "OpenProject",
-        "icon": "blocks",
+        "icon": "branch",
         "tone": "neutral",
         "tooltip": "OpenProject CE connection status (click to refresh)",
         "command": "openproject.refresh"
