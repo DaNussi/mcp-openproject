@@ -10,11 +10,13 @@ import {
   buildListModel,
   buildMemberOptions,
   cleanHex,
+  agentChoices,
   DEFAULT_PRIORITIES,
   formatDuration,
   lastActivity,
   normalizePrefs,
   readableTextOn,
+  shownOption,
   typeColor,
   type ListModel,
   type Option,
@@ -251,6 +253,11 @@ async function postComment(id: number): Promise<void> {
   render()
 }
 
+/** The agent the launch form shows: the person's pick, else the configured default, else the first installed. */
+function launchAgent(agentOptions: Option[]): string {
+  return shownOption(agentOptions, state.launch.agent, state.snapshot?.config.defaultAgent)
+}
+
 async function launchWorkspace(ticket: OpenProjectWorkPackage): Promise<void> {
   const model = buildLaunchModel(
     ticket,
@@ -260,10 +267,11 @@ async function launchWorkspace(ticket: OpenProjectWorkPackage): Promise<void> {
   )
   const workspaceId = model.selectedWorkspace
   const branchName = state.launch.branch.trim()
+  const agent = launchAgent(model.agentOptions)
   await call(async () => {
     const res = await orca.plugin.request('openproject.agent.launch', {
       ticketId: ticket.id,
-      agent: state.launch.agent || undefined,
+      agent,
       ...(workspaceId ? { workspaceId } : {}),
       createWorktree: state.launch.createWorktree,
       ...(state.launch.createWorktree && branchName ? { branchName } : {})
@@ -317,7 +325,7 @@ async function saveSetup(): Promise<void> {
       ...(s.token.trim() ? { apiToken: s.token.trim() } : {}),
       readProjects: s.readProjects,
       writeProjects: s.writeProjects,
-      defaultAgent: s.agent,
+      defaultAgent: shownOption(agentChoices(state.snapshot?.detectedAgents ?? []), s.agent),
       mcpBinaryPath: state.snapshot?.config.mcpBinaryPath || 'mcp-openproject',
       pageSize: state.pageSize
     })
@@ -330,7 +338,8 @@ async function saveSetup(): Promise<void> {
 
 async function registerMcp(): Promise<void> {
   await call(async () => {
-    const res = await orca.plugin.request('openproject.mcp.register', { agent: state.setup.agent })
+    const agent = shownOption(agentChoices(state.snapshot?.detectedAgents ?? []), state.setup.agent)
+    const res = await orca.plugin.request('openproject.mcp.register', { agent })
     feedback(
       'success',
       state.prefs.locale === 'vi' ? tr('feedback.registeredMcp', { configPath: res.configPath }) : res.summary
@@ -521,7 +530,7 @@ function renderTable(model: ListModel): string {
 function renderLaunch(ticket: OpenProjectWorkPackage): string {
   const snap = state.snapshot
   const model = buildLaunchModel(ticket, snap?.workspaces ?? [], snap?.detectedAgents ?? [], state.launch.workspaceId)
-  const agent = state.launch.agent || snap?.config.defaultAgent || 'codex'
+  const agent = launchAgent(model.agentOptions)
   const wt = state.launch.createWorktree
   return `<div class="launch">
     <div class="seg">
@@ -705,13 +714,13 @@ function renderSetupTab(): string {
   const snap = state.snapshot
   const s = state.setup
   const agents = snap?.detectedAgents ?? []
-  const installed = agents.filter((a) => a.installed)
-  const agentOptions = (installed.length ? installed : agents).map((a) => ({ value: a.id, label: a.label }))
-  const info = agents.find((a) => a.id === s.agent)
+  const agentOptions = agentChoices(agents)
+  const setupAgent = shownOption(agentOptions, s.agent)
+  const info = agents.find((a) => a.id === setupAgent)
   return `<div class="pad stack scroll">
     <label class="field"><span>${esc(tr('setup.baseUrlLabel'))}</span><input id="setup-url" type="text" data-bind="setup-url" placeholder="https://openproject.example.com" value="${esc(s.baseUrl)}"></label>
     <label class="field"><span>${esc(tr('setup.apiTokenLabel'))}</span><input id="setup-token" type="password" data-bind="setup-token" placeholder="${esc(snap?.config.hasToken ? tr('setup.apiTokenSavedPlaceholder') : '')}" value="${esc(s.token)}"></label>
-    <label class="field"><span>${esc(tr('setup.defaultAgentLabel'))}</span><select data-bind="setup-agent">${options(agentOptions.length ? agentOptions : [{ value: s.agent, label: s.agent }], s.agent)}</select></label>
+    <label class="field"><span>${esc(tr('setup.defaultAgentLabel'))}</span><select data-bind="setup-agent">${options(agentOptions, setupAgent)}</select></label>
     <div class="row">
       <button class="btn primary" data-action="setup-save">${esc(tr('setup.saveButton'))}</button>
       <button class="btn" data-action="setup-register">${esc(tr('setup.registerMcpButton'))}</button>

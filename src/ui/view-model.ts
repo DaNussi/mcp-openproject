@@ -305,6 +305,24 @@ export function priorityColor(name: string, color: string | undefined): string |
   return cleanHex(color)
 }
 
+/**
+ * The value a `<select>` really shows: `wanted` when it is an option, else `fallback` when that is
+ * one, else the first option. A browser shows the first option for an unknown value and fires no
+ * change event when the person picks it, so state must follow what is shown, not what was stored.
+ */
+export function shownOption(options: Option[], wanted: string | undefined, fallback?: string): string {
+  if (wanted && options.some((o) => o.value === wanted)) return wanted
+  if (fallback && options.some((o) => o.value === fallback)) return fallback
+  return options[0]?.value ?? wanted ?? ''
+}
+
+/** Agent choices for Setup and launch: installed agents, or every known one when none is detected. */
+export function agentChoices(detectedAgents: DetectedAgentCli[]): Option[] {
+  const installed = detectedAgents.filter((a) => a.installed)
+  const source = installed.length > 0 ? installed : detectedAgents
+  return source.length > 0 ? source.map((a) => ({ value: a.id, label: a.label })) : FALLBACK_AGENT_OPTIONS
+}
+
 // ---------------------------------------------------------------------------------------------
 // Workspace launch
 
@@ -401,9 +419,6 @@ export function buildLaunchModel(
       worktreeOptions[0]?.value ||
       selectedId
 
-  const installed = detectedAgents.filter((a) => a.installed)
-  const agentSource = installed.length > 0 ? installed : detectedAgents
-
   return {
     repoOptions:
       repoGroups.length > 0
@@ -412,8 +427,7 @@ export function buildLaunchModel(
     selectedRepo: active?.representative.id || selectedId,
     worktreeOptions,
     selectedWorkspace,
-    agentOptions:
-      agentSource.length > 0 ? agentSource.map((a) => ({ value: a.id, label: a.label })) : FALLBACK_AGENT_OPTIONS,
+    agentOptions: agentChoices(detectedAgents),
     workspaceForRepo(repoValue: string): string {
       const g = repoGroups.find((x) => x.representative.id === repoValue)
       if (!g) return repoValue

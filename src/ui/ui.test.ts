@@ -3,6 +3,7 @@ import type { OpenProjectStateSnapshot, OpenProjectWorkPackage } from '../protoc
 import { mapHalActivity, mapHalWorkPackage } from '../openproject-api'
 import { renderMarkdown } from './markdown'
 import {
+  agentChoices,
   buildLaunchModel,
   buildListModel,
   DEFAULT_PREFS,
@@ -10,6 +11,7 @@ import {
   lastActivity,
   normalizePrefs,
   readableTextOn,
+  shownOption,
   typeColor,
   type UiPrefs
 } from './view-model'
@@ -202,4 +204,16 @@ test('HAL mapping: dates, version, created and journal details', () => {
   })
   assert.equal(activity.user, 'Sam Reviewer')
   assert.deepEqual(activity.details, ['**Status** changed from *New* to *In progress*'])
+})
+
+test('agent: launch uses the agent the dropdown shows, not a stale default', () => {
+  const choices = agentChoices([
+    { id: 'claude', label: 'Claude Code', installed: true },
+    { id: 'codex', label: 'Codex', installed: false }
+  ])
+  assert.deepEqual(choices, [{ value: 'claude', label: 'Claude Code' }])
+  // Default "codex" is not installed: the dropdown shows Claude Code, so that is what launches.
+  assert.equal(shownOption(choices, 'codex', 'codex'), 'claude')
+  assert.equal(shownOption(choices, 'claude', 'codex'), 'claude')
+  assert.equal(shownOption([{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }], 'x', 'b'), 'b')
 })
