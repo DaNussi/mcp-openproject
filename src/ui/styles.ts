@@ -120,6 +120,12 @@ dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; ma
 .panels > section { min-width: 0; }
 dl.kv dt { color: var(--orca-muted-foreground); }
 dl.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+svg.icon { width: 15px; height: 15px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.spinner { width: 13px; height: 13px; flex: 0 0 auto; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: op-spin .7s linear infinite; }
+@keyframes op-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+fieldset.launch { margin: 0; min-width: 0; }
+fieldset.launch.busy .btn.primary:disabled { opacity: .85; }
 .launch { border: 1px solid var(--orca-ring); border-radius: var(--orca-radius); padding: 10px; background: var(--orca-card); display: flex; flex-direction: column; gap: 8px; }
 .progress { display: inline-block; width: 80px; height: 6px; border-radius: 3px; background: var(--orca-muted); vertical-align: middle; overflow: hidden; }
 .progress > span { display: block; height: 100%; background: var(--orca-primary); }

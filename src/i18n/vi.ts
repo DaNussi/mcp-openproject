@@ -151,5 +151,9 @@ export const VI_LOCALE: Record<string, string> = {
   'detail.done': '% hoàn thành',
   'detail.estimated': 'Ước tính',
   'detail.version': 'Version',
-  'detail.created': 'Tạo lúc'
+  'detail.created': 'Tạo lúc',
+  'ticket.creatingWorkspace': 'Đang tạo workspace…',
+  'ticket.startingAgent': 'Đang chạy agent…',
+  'ticket.creatingWorkspaceHint': 'Orca đang tạo worktree và chạy setup của project. Có thể mất tới một phút.',
+  'ticket.startingAgentHint': 'Orca đang chạy agent trong workspace.'
 }

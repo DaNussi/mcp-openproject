@@ -44,6 +44,8 @@ const state = {
   detailTab: 'overview' as DetailTab,
   filtersOpen: false,
   launchOpen: false,
+  /** A launch request is in flight: the form is locked and shows a spinner. */
+  launching: false,
   launch: { createWorktree: true, workspaceId: '', branch: '', agent: '' },
   comment: '',
   feedback: null as Feedback,
@@ -268,23 +270,35 @@ async function launchWorkspace(ticket: OpenProjectWorkPackage): Promise<void> {
   const workspaceId = model.selectedWorkspace
   const branchName = state.launch.branch.trim()
   const agent = launchAgent(model.agentOptions)
-  await call(async () => {
-    const res = await orca.plugin.request('openproject.agent.launch', {
-      ticketId: ticket.id,
-      agent,
-      ...(workspaceId ? { workspaceId } : {}),
-      createWorktree: state.launch.createWorktree,
-      ...(state.launch.createWorktree && branchName ? { branchName } : {})
-    })
-    state.launchOpen = false
-    feedback('accent', tr('feedback.launchedAgent', {
-      agent: res.agent,
-      workspace: res.workspaceName || res.workspaceId,
-      branch: res.branchSlug,
-      terminalId: res.terminalId
-    }))
-  })
+  if (state.launching) return
+  state.launching = true
   render()
+  try {
+    await call(async () => {
+      const res = await orca.plugin.request(
+        'openproject.agent.launch',
+        {
+          ticketId: ticket.id,
+          agent,
+          ...(workspaceId ? { workspaceId } : {}),
+          createWorktree: state.launch.createWorktree,
+          ...(state.launch.createWorktree && branchName ? { branchName } : {})
+        },
+        // Creating a worktree runs the project's setup script; allow Orca's maximum.
+        { timeoutMs: 120000 }
+      )
+      state.launchOpen = false
+      feedback('accent', tr('feedback.launchedAgent', {
+        agent: res.agent,
+        workspace: res.workspaceName || res.workspaceId,
+        branch: res.branchSlug,
+        terminalId: res.terminalId
+      }))
+    })
+  } finally {
+    state.launching = false
+    render()
+  }
 }
 
 async function createTicket(): Promise<void> {
@@ -354,6 +368,10 @@ function openExternal(url: string): void {
 
 // ---------------------------------------------------------------------------------------------
 // Rendering helpers
+
+/** The plugin icon (work package card + branch), drawn in the current text color. */
+const BRANCH_ICON =
+  '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h6a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M6 8h4 M6 11h4 M6 14h2.5 M21 6a2 2 0 1 1-4 0a2 2 0 1 1 4 0 M21 18a2 2 0 1 1-4 0a2 2 0 1 1 4 0 M19 8v8 M13 12h2a4 4 0 0 0 4-4"/></svg>'
 
 function options(list: Option[], selected: string): string {
   return list
@@ -532,7 +550,11 @@ function renderLaunch(ticket: OpenProjectWorkPackage): string {
   const model = buildLaunchModel(ticket, snap?.workspaces ?? [], snap?.detectedAgents ?? [], state.launch.workspaceId)
   const agent = launchAgent(model.agentOptions)
   const wt = state.launch.createWorktree
-  return `<div class="launch">
+  const busy = state.launching
+  const startLabel = busy
+    ? `<span class="spinner" aria-hidden="true"></span>${esc(tr(wt ? 'ticket.creatingWorkspace' : 'ticket.startingAgent'))}`
+    : `${BRANCH_ICON}${esc(wt ? tr('ticket.createAndStartButton') : tr('ticket.startAgentButton'))}`
+  return `<fieldset class="launch${busy ? ' busy' : ''}" ${busy ? 'disabled aria-busy="true"' : ''}>
     <div class="seg">
       <button data-action="launch-mode" data-worktree="1" class="${wt ? 'on' : ''}">${esc(tr('ticket.launchModeWorktree'))}</button>
       <button data-action="launch-mode" data-worktree="0" class="${wt ? '' : 'on'}">${esc(tr('ticket.launchModeExisting'))}</button>
@@ -543,10 +565,11 @@ function renderLaunch(ticket: OpenProjectWorkPackage): string {
       : `<label class="field"><span>${esc(tr('ticket.targetWorkspaceLabel'))}</span><select data-bind="launch-workspace">${options(model.worktreeOptions, model.selectedWorkspace)}</select></label>`}
     <label class="field"><span>${esc(tr('ticket.launchAgentSelectLabel'))}</span><select data-bind="launch-agent">${options(model.agentOptions, agent)}</select></label>
     <div class="row">
-      <button class="btn primary" data-action="launch-start">${esc(wt ? tr('ticket.createAndStartButton') : tr('ticket.startAgentButton'))}</button>
+      <button class="btn primary" data-action="launch-start">${startLabel}</button>
       <button class="btn" data-action="launch-toggle">${esc(tr('ticket.cancelLaunchButton'))}</button>
     </div>
-  </div>`
+    ${busy ? `<div class="muted">${esc(tr(wt ? 'ticket.creatingWorkspaceHint' : 'ticket.startingAgentHint'))}</div>` : ''}
+  </fieldset>`
 }
 
 function renderTicket(ticket: OpenProjectWorkPackage): string {
@@ -651,7 +674,7 @@ function renderTicket(ticket: OpenProjectWorkPackage): string {
           ${url ? `<button class="icon-btn" data-action="open-url" data-url="${esc(url)}" title="${esc(tr('detail.openInOpenProject'))}">↗</button>` : ''}
           <button class="icon-btn" data-action="close-ticket" title="${esc(tr('ticket.close'))}">✕</button>
         </div>
-        <button class="btn primary lg" data-action="launch-toggle">⑂ ${esc(tr('ticket.launchAgent'))}</button>
+        <button class="btn primary lg" data-action="launch-toggle" ${state.launching ? 'disabled' : ''}>${state.launching ? '<span class="spinner" aria-hidden="true"></span>' : BRANCH_ICON}${esc(tr('ticket.launchAgent'))}</button>
       </div>
     </div>
     ${state.launchOpen ? renderLaunch(ticket) : ''}

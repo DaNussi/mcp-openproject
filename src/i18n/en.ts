@@ -151,5 +151,9 @@ export const EN_LOCALE: Record<string, string> = {
   'detail.done': '% done',
   'detail.estimated': 'Estimated',
   'detail.version': 'Version',
-  'detail.created': 'Created'
+  'detail.created': 'Created',
+  'ticket.creatingWorkspace': 'Creating workspace…',
+  'ticket.startingAgent': 'Starting agent…',
+  'ticket.creatingWorkspaceHint': 'Orca is creating the worktree and running the project setup. This can take up to a minute.',
+  'ticket.startingAgentHint': 'Orca is starting the agent in the workspace.'
 }
