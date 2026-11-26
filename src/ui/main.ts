@@ -11,6 +11,8 @@ import {
   buildMemberOptions,
   cleanHex,
   DEFAULT_PRIORITIES,
+  formatDuration,
+  lastActivity,
   normalizePrefs,
   readableTextOn,
   typeColor,
@@ -554,16 +556,48 @@ function renderTicket(ticket: OpenProjectWorkPackage): string {
 
   let body = ''
   if (state.detailTab === 'overview') {
+    const latest = lastActivity(activities)
+    const watchers =
+      ticket.watchers === undefined
+        ? ''
+        : `<dt>${esc(tr('detail.watchers'))}</dt><dd>${
+            ticket.watchers.length ? ticket.watchers.map(esc).join(', ') : '<span class="muted">—</span>'
+          }</dd>`
+    const dateRows: Array<[string, string]> = []
+    if (ticket.startDate || ticket.dueDate) {
+      const range =
+        ticket.startDate && ticket.dueDate && ticket.startDate !== ticket.dueDate
+          ? `${ticket.startDate} → ${ticket.dueDate}`
+          : (ticket.dueDate ?? ticket.startDate)!
+      dateRows.push([tr('detail.dates'), esc(range)])
+    }
+    if (ticket.percentageDone !== undefined && ticket.percentageDone > 0) {
+      dateRows.push([
+        tr('detail.done'),
+        `<span class="progress"><span style="width:${Math.min(100, Math.max(0, ticket.percentageDone))}%"></span></span> ${ticket.percentageDone}%`
+      ])
+    }
+    const estimate = formatDuration(ticket.estimatedTime)
+    if (estimate) dateRows.push([tr('detail.estimated'), esc(estimate)])
+    if (ticket.version) dateRows.push([tr('detail.version'), esc(ticket.version)])
+    if (ticket.createdAt) dateRows.push([tr('detail.created'), esc(formatShortDate(ticket.createdAt))])
     body = `
       <div class="section-title">${esc(tr('detail.sectionPeople'))}</div>
       <dl class="kv"><dt>${esc(tr('ticket.assignee'))}</dt><dd>${person(ticket.assignee)}</dd>
-        <dt>${esc(tr('ticket.responsible'))}</dt><dd>${person(ticket.responsible)}</dd></dl>
+        <dt>${esc(tr('ticket.responsible'))}</dt><dd>${person(ticket.responsible)}</dd>
+        ${watchers}
+        ${latest ? `<dt>${esc(tr('detail.lastActivity'))}</dt><dd>${esc(latest.user)} <span class="muted">· ${esc(formatShortDate(latest.createdAt))}</span></dd>` : ''}
+      </dl>
+      ${dateRows.length ? `<div class="section-title">${esc(tr('detail.sectionDates'))}</div>
+      <dl class="kv">${dateRows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>` : ''}
       <div class="section-title">${esc(tr('ticket.description'))}</div>
       ${ticket.description ? `<div class="md">${renderMarkdown(ticket.description)}</div>` : `<div class="muted">${esc(tr('detail.noDescription'))}</div>`}`
   } else if (state.detailTab === 'activity') {
     const items = [...activities]
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      .map((a) => `<div class="activity"><div class="who"><strong>${esc(a.user)}</strong><span class="muted">${esc(formatShortDate(a.createdAt))}</span></div><div class="md">${renderMarkdown(a.comment)}</div></div>`)
+      .map((a) => `<div class="activity"><div class="who"><strong>${esc(a.user)}</strong><span class="muted">${esc(formatShortDate(a.createdAt))}</span></div>${
+        a.details?.length ? `<ul class="changes md">${a.details.map((d) => `<li>${renderMarkdown(d).replace(/^<p>|<\/p>$/g, '')}</li>`).join('')}</ul>` : ''
+      }${a.comment.trim() ? `<div class="md">${renderMarkdown(a.comment)}</div>` : ''}</div>`)
       .join('')
     body = `
       <textarea id="comment" data-bind="comment" rows="3" placeholder="${esc(tr('detail.commentPlaceholder'))}">${esc(state.comment)}</textarea>

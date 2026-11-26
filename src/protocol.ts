@@ -56,6 +56,17 @@ export interface OpenProjectWorkPackage {
   parentSubject?: string
   ancestorIds?: number[]
   childIds?: number[]
+  createdAt?: string
+  /** `YYYY-MM-DD`; milestones only have a single date, mapped to both. */
+  startDate?: string
+  dueDate?: string
+  /** 0–100 */
+  percentageDone?: number
+  /** ISO 8601 duration as OpenProject sends it, e.g. `PT8H`. */
+  estimatedTime?: string
+  version?: string
+  /** Watcher names; set once the ticket was opened and the token may see watchers. */
+  watchers?: string[]
   updatedAt: string
   lockVersion: number
 }
@@ -65,6 +76,8 @@ export interface OpenProjectActivity {
   user: string
   comment: string
   createdAt: string
+  /** What changed in this journal entry, as OpenProject's Markdown lines. */
+  details?: string[]
 }
 
 export interface DetectedAgentCli {

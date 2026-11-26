@@ -143,5 +143,13 @@ export const EN_LOCALE: Record<string, string> = {
   'detail.emptyTitle': 'No work package selected',
   'detail.emptyHint': 'Select a work package in the table to see it here.',
   'wp.colAssignee': 'Assignee',
-  'detail.backToList': 'Back to list'
+  'detail.backToList': 'Back to list',
+  'detail.watchers': 'Watchers',
+  'detail.lastActivity': 'Last activity',
+  'detail.sectionDates': 'Dates',
+  'detail.dates': 'Start → finish',
+  'detail.done': '% done',
+  'detail.estimated': 'Estimated',
+  'detail.version': 'Version',
+  'detail.created': 'Created'
 }

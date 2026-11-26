@@ -388,6 +388,16 @@ export function mapHalWorkPackage(
     lockVersion: Number(raw.lockVersion ?? 0)
   }
 
+  const day = (v: unknown) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : undefined)
+  const startDate = day(raw.startDate) ?? day(raw.date)
+  const dueDate = day(raw.dueDate) ?? day(raw.date)
+  if (startDate) item.startDate = startDate
+  if (dueDate) item.dueDate = dueDate
+  if (typeof raw.percentageDone === 'number') item.percentageDone = raw.percentageDone
+  if (typeof raw.estimatedTime === 'string' && raw.estimatedTime) item.estimatedTime = raw.estimatedTime
+  if (typeof links.version?.title === 'string' && links.version.title) item.version = links.version.title
+  if (typeof raw.createdAt === 'string' && raw.createdAt) item.createdAt = raw.createdAt
+
   if (statusColor) item.statusColor = statusColor
   if (typeId > 0) item.typeId = typeId
   if (typeColor) item.typeColor = typeColor
@@ -449,10 +459,18 @@ export function mapHalPrincipal(raw: Record<string, any>): OpenProjectPrincipalI
 
 export function mapHalActivity(raw: Record<string, any>): OpenProjectActivity {
   const links = raw._links ?? {}
-  return {
+  const activity: OpenProjectActivity = {
     id: Number(raw.id ?? 0),
     user: String(links.user?.title ?? 'System'),
     comment: String(raw.comment?.raw ?? ''),
     createdAt: String(raw.createdAt ?? '')
   }
+  const details = Array.isArray(raw.details)
+    ? raw.details
+        .map((d: any) => (typeof d?.raw === 'string' ? d.raw.trim() : ''))
+        .filter((d: string) => d.length > 0)
+        .slice(0, 20)
+    : []
+  if (details.length > 0) activity.details = details
+  return activity
 }

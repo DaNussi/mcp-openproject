@@ -239,6 +239,28 @@ export function buildMemberOptions(snapshot: OpenProjectStateSnapshot | null, un
   ]
 }
 
+/** OpenProject's ISO 8601 durations (`PT8H30M`, `P1DT2H`) as hours, e.g. `8.5 h`; days count 24 h. */
+export function formatDuration(iso: string | undefined): string | null {
+  const m = /^P(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/.exec(
+    (iso ?? '').trim()
+  )
+  if (!m || (!m[1] && !m[2] && !m[3] && !m[4])) return null
+  const hours =
+    Number(m[1] ?? 0) * 24 + Number(m[2] ?? 0) + Number(m[3] ?? 0) / 60 + Number(m[4] ?? 0) / 3600
+  return `${Math.round(hours * 100) / 100} h`
+}
+
+/** The newest journal entry: who touched the work package last, and when. */
+export function lastActivity(
+  activities: Array<{ user: string; createdAt: string }>
+): { user: string; createdAt: string } | null {
+  let latest: { user: string; createdAt: string } | null = null
+  for (const a of activities) {
+    if (a.createdAt && (!latest || a.createdAt > latest.createdAt)) latest = a
+  }
+  return latest
+}
+
 // ---------------------------------------------------------------------------------------------
 // Colors
 

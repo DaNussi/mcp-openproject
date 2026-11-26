@@ -118,6 +118,9 @@ dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; ma
 dl.kv dt { color: var(--orca-muted-foreground); }
 dl.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .launch { border: 1px solid var(--orca-ring); border-radius: var(--orca-radius); padding: 10px; background: var(--orca-card); display: flex; flex-direction: column; gap: 8px; }
+.progress { display: inline-block; width: 80px; height: 6px; border-radius: 3px; background: var(--orca-muted); vertical-align: middle; overflow: hidden; }
+.progress > span { display: block; height: 100%; background: var(--orca-primary); }
+.changes { margin: 0 0 4px; padding-left: 16px; color: var(--orca-muted-foreground); }
 .activity { border: 1px solid var(--orca-border); border-radius: var(--orca-radius); padding: 8px; }
 .activity .who { display: flex; justify-content: space-between; gap: 6px; margin-bottom: 4px; }
 .rel-list { display: flex; flex-direction: column; }

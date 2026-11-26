@@ -1,10 +1,13 @@
 import { assert, test } from 'orca/testing'
 import type { OpenProjectStateSnapshot, OpenProjectWorkPackage } from '../protocol'
+import { mapHalActivity, mapHalWorkPackage } from '../openproject-api'
 import { renderMarkdown } from './markdown'
 import {
   buildLaunchModel,
   buildListModel,
   DEFAULT_PREFS,
+  formatDuration,
+  lastActivity,
   normalizePrefs,
   readableTextOn,
   typeColor,
@@ -147,4 +150,56 @@ test('markdown: escapes HTML, renders common markup, only safe links', () => {
   assert.ok(!html.includes('javascript:'))
   assert.ok(html.includes('<blockquote>'))
   assert.ok(html.includes('A B'))
+})
+
+test('people & dates helpers: durations, last activity', () => {
+  assert.equal(formatDuration('PT8H'), '8 h')
+  assert.equal(formatDuration('PT8H30M'), '8.5 h')
+  assert.equal(formatDuration('P1DT2H'), '26 h')
+  assert.equal(formatDuration(''), null)
+  assert.equal(formatDuration('P'), null)
+  assert.deepEqual(
+    lastActivity([
+      { user: 'A', createdAt: '2026-11-01T10:00:00Z' },
+      { user: 'B', createdAt: '2026-11-03T10:00:00Z' },
+      { user: 'C', createdAt: '2026-11-02T10:00:00Z' }
+    ]),
+    { user: 'B', createdAt: '2026-11-03T10:00:00Z' }
+  )
+  assert.equal(lastActivity([]), null)
+})
+
+test('HAL mapping: dates, version, created and journal details', () => {
+  const mapped = mapHalWorkPackage({
+    id: 5,
+    subject: 'S',
+    startDate: '2026-11-01',
+    dueDate: '2026-11-20',
+    percentageDone: 40,
+    estimatedTime: 'PT6H',
+    createdAt: '2026-10-30T09:00:00Z',
+    _links: {
+      project: { href: '/api/v3/projects/3', title: 'P' },
+      version: { href: '/api/v3/versions/1', title: 'Sprint 12' }
+    }
+  })
+  assert.equal(mapped.startDate, '2026-11-01')
+  assert.equal(mapped.dueDate, '2026-11-20')
+  assert.equal(mapped.percentageDone, 40)
+  assert.equal(mapped.estimatedTime, 'PT6H')
+  assert.equal(mapped.version, 'Sprint 12')
+  assert.equal(mapped.createdAt, '2026-10-30T09:00:00Z')
+  const milestone = mapHalWorkPackage({ id: 6, subject: 'M', date: '2026-12-24', _links: {} })
+  assert.equal(milestone.startDate, '2026-12-24')
+  assert.equal(milestone.dueDate, '2026-12-24')
+
+  const activity = mapHalActivity({
+    id: 9,
+    createdAt: '2026-11-02T10:00:00Z',
+    comment: { raw: '' },
+    details: [{ raw: '**Status** changed from *New* to *In progress*' }, { raw: '' }],
+    _links: { user: { title: 'Sam Reviewer' } }
+  })
+  assert.equal(activity.user, 'Sam Reviewer')
+  assert.deepEqual(activity.details, ['**Status** changed from *New* to *In progress*'])
 })

@@ -1553,8 +1553,92 @@ export default function activate(orca: OrcaWorkerApi): void {
       }
     }
 
+    let activities = activitiesMap[String(id)] ?? []
+    if (hasRemoteApi) {
+      // Details the list endpoints don't carry: dates/version (fresh copy), watchers and the
+      // real journal. Each is optional; a missing permission just leaves that part out.
+      const [remoteWp, remoteActivities, remoteWatchers] = await Promise.all([
+        fetchOpenProjectJson(creds, `/api/v3/work_packages/${id}`).catch(() => null),
+        fetchOpenProjectJson(creds, `/api/v3/work_packages/${id}/activities`).catch(() => null),
+        fetchOpenProjectJson(creds, `/api/v3/work_packages/${id}/watchers`).catch(() => null)
+      ])
+      const extra: Partial<OpenProjectWorkPackage> = {}
+      if (remoteWp && isHalWorkPackageProjectValid(remoteWp)) {
+        const fresh = mapHalWorkPackage(remoteWp)
+        if (fresh.createdAt) extra.createdAt = fresh.createdAt
+        if (fresh.startDate) extra.startDate = fresh.startDate
+        if (fresh.dueDate) extra.dueDate = fresh.dueDate
+        if (fresh.percentageDone !== undefined) extra.percentageDone = fresh.percentageDone
+        if (fresh.estimatedTime) extra.estimatedTime = fresh.estimatedTime
+        if (fresh.version) extra.version = fresh.version
+      }
+      const watcherElements = (remoteWatchers as Record<string, any> | null)?._embedded?.elements
+      if (Array.isArray(watcherElements)) {
+        extra.watchers = watcherElements
+          .map((w: any) => String(w?.name ?? '').trim())
+          .filter((name: string) => name.length > 0)
+      }
+      if (Object.keys(extra).length > 0) {
+        existing = { ...existing, ...extra }
+        const cached = [...(liveCache.workPackages ?? workPackages)]
+        const at = cached.findIndex((wp) => wp.id === id)
+        if (at !== -1) {
+          cached[at] = existing
+          liveCache.workPackages = cached
+        }
+      }
+      const journal = (remoteActivities as Record<string, any> | null)?._embedded?.elements
+      if (Array.isArray(journal)) {
+        // Journal user links carry only an href; resolve names from principals, then /users/{id}.
+        const userIdOf = (raw: Record<string, any>) => {
+          const href = raw?._links?.user?.href
+          const tail = typeof href === 'string' ? href.split('/').filter(Boolean).pop() : ''
+          return tail && /^\d+$/.test(tail) ? Number(tail) : 0
+        }
+        const principals = await readStoredPrincipals(orca)
+        const nameById = new Map<number, string>(principals.map((p) => [p.id, p.name]))
+        const unknownIds = [
+          ...new Set(
+            journal
+              .filter((raw: Record<string, any>) => !raw?._links?.user?.title)
+              .map(userIdOf)
+              .filter((uid: number) => uid > 0 && !nameById.has(uid))
+          )
+        ].slice(0, 10) as number[]
+        const fetched = await Promise.all(
+          unknownIds.map((uid) =>
+            fetchOpenProjectJson(creds, `/api/v3/users/${uid}`)
+              .then((u: Record<string, any>) => [uid, String(u?.name ?? '').trim()] as const)
+              .catch(() => [uid, ''] as const)
+          )
+        )
+        for (const [uid, name] of fetched) if (name) nameById.set(uid, name)
+        activities = journal
+          .map((raw: Record<string, any>) => {
+            const activity = mapHalActivity(raw)
+            if (!raw?._links?.user?.title) {
+              const name = nameById.get(userIdOf(raw))
+              if (name) activity.user = name
+            }
+            return activity
+          })
+          .filter((a) => a.comment.trim().length > 0 || (a.details?.length ?? 0) > 0)
+          .slice(-50)
+        activitiesMap[String(id)] = activities
+        // Keep the stored journal small: the 30 most recently opened tickets.
+        const keys = Object.keys(activitiesMap)
+        for (const key of keys.slice(0, Math.max(0, keys.length - 30))) {
+          if (key !== String(id)) delete activitiesMap[key]
+        }
+        delete activitiesMap[String(id)]
+        activitiesMap[String(id)] = activities
+        await orca.storage
+          .set(STORAGE_KEYS.ACTIVITIES_BY_TICKET, activitiesMap as unknown as any)
+          .catch(() => {})
+      }
+    }
+
     await orca.storage.set(STORAGE_KEYS.SELECTED_TICKET_ID, id)
-    const activities = activitiesMap[String(id)] ?? []
     await broadcastSnapshot(orca)
     return { workPackage: existing, activities }
   })

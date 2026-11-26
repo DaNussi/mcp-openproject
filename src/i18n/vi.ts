@@ -143,5 +143,13 @@ export const VI_LOCALE: Record<string, string> = {
   'detail.emptyTitle': 'Chưa chọn work package',
   'detail.emptyHint': 'Chọn một work package trong bảng để xem ở đây.',
   'wp.colAssignee': 'Assignee',
-  'detail.backToList': 'Quay lại danh sách'
+  'detail.backToList': 'Quay lại danh sách',
+  'detail.watchers': 'Người theo dõi',
+  'detail.lastActivity': 'Hoạt động gần nhất',
+  'detail.sectionDates': 'Thời gian',
+  'detail.dates': 'Bắt đầu → kết thúc',
+  'detail.done': '% hoàn thành',
+  'detail.estimated': 'Ước tính',
+  'detail.version': 'Version',
+  'detail.created': 'Tạo lúc'
 }
