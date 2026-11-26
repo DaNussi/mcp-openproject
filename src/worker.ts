@@ -21,6 +21,8 @@ import {
 } from './openproject-api'
 import type {
   DetectedAgentCli,
+  LaunchAgentInput,
+  LaunchAgentOutput,
   OpenProjectActivity,
   OpenProjectConfigSummary,
   OpenProjectPrincipalItem,
@@ -1967,7 +1969,22 @@ export default function activate(orca: OrcaWorkerApi): void {
     }
   })
 
+  // One launch per ticket at a time: parallel `git worktree add` runs on one repository race for
+  // its config (on Windows the loser fails with ".git/config: Permission denied").
+  const launchesInFlight = new Set<number>()
   orca.panels.handle('openproject.agent.launch', async (input) => {
+    if (launchesInFlight.has(input.ticketId)) {
+      throw new Error(`A workspace for #${input.ticketId} is already being created. Wait for it to finish.`)
+    }
+    launchesInFlight.add(input.ticketId)
+    try {
+      return await launchTicket(input)
+    } finally {
+      launchesInFlight.delete(input.ticketId)
+    }
+  })
+
+  const launchTicket = async (input: LaunchAgentInput): Promise<LaunchAgentOutput> => {
     const creds = await resolveCredentials(orca)
     const workPackages = await readStoredWorkPackages(orca)
     const ticket = workPackages.find((wp) => wp.id === input.ticketId)
@@ -2087,7 +2104,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       createdWorktree,
       focused
     }
-  })
+  }
 
   orca.panels.handle('openproject.mcp.register', async (input) => {
     const creds = await resolveCredentials(orca)

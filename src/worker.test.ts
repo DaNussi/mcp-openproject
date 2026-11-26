@@ -229,3 +229,30 @@ test('Create workspace goes through Orca: workspace.create for a new branch, age
   assert.equal(reused.workspaceId, 'proj-1::/home/dev/orca/workspaces/acme-app/op-1428-fix-token-refresh')
   await worker.deactivate()
 })
+
+test('a second launch for the same ticket is refused while the first one runs', async () => {
+  let release: (v: unknown) => void = () => undefined
+  const host = mockHost({
+    settings: { baseUrl: 'https://openproject.example.com', readProjects: '*', writeProjects: '*', defaultAgent: 'codex' },
+    secrets: { 'openproject.apiToken': 'opapi-secret-123' },
+    storage: { 'openproject.projects': sampleProjects, 'openproject.workPackages': sampleWorkPackages },
+    results: {
+      'workspace.list': {
+        workspaces: [
+          { id: 'proj-1::/repo', kind: 'worktree', name: 'repo', projectId: 'proj-1', path: '/repo', branch: 'main', hostId: 'local' }
+        ],
+        truncated: false
+      },
+      'workspace.create': () => new Promise((resolve) => { release = () => resolve({ workspaceId: 'proj-1::/new', terminalId: 't1' }) })
+    }
+  })
+  const worker = await mountWorker(main, { host })
+  const input = { ticketId: 1428, agent: 'claude', workspaceId: 'proj-1::/repo', createWorktree: true }
+  const first = worker.request('openproject.agent.launch', input)
+  await new Promise((r) => setTimeout(r, 20))
+  await assert.rejects(worker.request('openproject.agent.launch', input), /already being created/)
+  release(undefined)
+  assert.equal((await first).workspaceId, 'proj-1::/new')
+  assert.equal(worker.host.callsOf('workspace.create').length, 1)
+  await worker.deactivate()
+})
