@@ -1,4 +1,5 @@
 import {
+  Badge,
   Box,
   Button,
   Heading,
@@ -10,7 +11,6 @@ import {
   Markdown,
   read,
   Row,
-  Select,
   Separator,
   set,
   shell,
@@ -24,7 +24,6 @@ import { createTranslator, type UiLocale } from '../i18n'
 import type {
   DetectedAgentCli,
   OpenProjectActivity,
-  OpenProjectPrincipalItem,
   OpenProjectWorkPackage,
   OpenProjectWorkspaceOption
 } from '../protocol'
@@ -32,21 +31,15 @@ import {
   commentDraftAtom,
   detailTabAtom,
   launchPanelOpenAtom,
-  nextAssigneeDraftAtom,
-  nextResponsibleDraftAtom,
-  nextStatusDraftAtom,
   postTicketComment,
-  saveTicketChanges,
   selectTicket,
-  startCreatingSubtask,
   ticketDetailExpandedAtom
 } from '../state/panel-state'
 import {
   formatShortDate,
   getPriorityToneStyle,
   getStatusToneStyle,
-  getTypeToneStyle,
-  resolvePrincipalIdString
+  getTypeToneStyle
 } from '../utils/openproject-tones'
 import { workPackageUrl } from '../utils/work-package-table'
 import { LaunchAgentDrawer } from './LaunchAgentDrawer'
@@ -56,11 +49,7 @@ export interface TicketDetailViewProps {
   ticket: OpenProjectWorkPackage
   baseUrl: string
   allWorkPackages: OpenProjectWorkPackage[]
-  canCreateSubtask?: boolean
   activities: OpenProjectActivity[]
-  principals: OpenProjectPrincipalItem[]
-  statusTransitionOptions: Array<{ value: string; label: string; color?: string }>
-  memberOptions: Array<{ value: string; label: string }>
   workspaces?: OpenProjectWorkspaceOption[]
   detectedAgents?: DetectedAgentCli[]
 }
@@ -76,76 +65,37 @@ function SectionTitle(label: string) {
   )
 }
 
-function sameName(a: string, b: string): boolean {
-  return a.toLowerCase().trim() === b.toLowerCase().trim()
+function personOrDash(name: string | undefined): string {
+  return name && name !== 'Unassigned' ? name : '—'
 }
 
-/** OpenProject's split-screen work package view: header, status, Overview / Activity / Relations. */
+/**
+ * Read-only OpenProject work package view. Its one action is starting work: create a workspace
+ * (or reuse one) and launch an agent. Commenting is the only write.
+ */
 export function TicketDetailView({
   locale,
   ticket,
   baseUrl,
   allWorkPackages,
-  canCreateSubtask,
   activities,
-  principals,
-  statusTransitionOptions,
-  memberOptions,
   workspaces = [],
   detectedAgents = []
 }: TicketDetailViewProps) {
   const tr = createTranslator(locale)
   const detailTab = read(detailTabAtom)
   const launchPanelOpen = read(launchPanelOpenAtom)
-  const statusDraft = read(nextStatusDraftAtom) || ticket.status
-  const assigneeDraft = read(nextAssigneeDraftAtom) || '0'
-  const responsibleDraft = read(nextResponsibleDraftAtom) || '0'
   const commentDraft = read(commentDraftAtom)
 
-  const currentAssignee = resolvePrincipalIdString(
-    ticket.assigneeId,
-    ticket.assignee,
-    principals
-  )
-  const currentResponsible = resolvePrincipalIdString(
-    ticket.responsibleId,
-    ticket.responsible,
-    principals
-  )
-  const isDirty =
-    !sameName(statusDraft, ticket.status) ||
-    assigneeDraft !== currentAssignee ||
-    responsibleDraft !== currentResponsible
-
-  const ticketMemberOptions = [...memberOptions]
-  if (
-    ticket.assigneeId &&
-    !ticketMemberOptions.some((o) => o.value === String(ticket.assigneeId))
-  ) {
-    ticketMemberOptions.push({ value: String(ticket.assigneeId), label: ticket.assignee })
-  }
-  if (
-    ticket.responsibleId &&
-    !ticketMemberOptions.some((o) => o.value === String(ticket.responsibleId))
-  ) {
-    ticketMemberOptions.push({
-      value: String(ticket.responsibleId),
-      label: ticket.responsible || `User #${ticket.responsibleId}`
-    })
-  }
-
-  const statusOptions = statusTransitionOptions.some((o) =>
-    sameName(o.value, statusDraft)
-  )
-    ? statusTransitionOptions
-    : [{ value: statusDraft, label: statusDraft }, ...statusTransitionOptions]
-  const statusSelectValue =
-    statusOptions.find((o) => sameName(o.value, statusDraft))?.value ?? statusDraft
-
-  const typeStyle = getTypeToneStyle(ticket.type, ticket.typeColor)
-  const statusStyle = getStatusToneStyle(ticket.status, ticket.statusColor)
-  const prioStyle = getPriorityToneStyle(ticket.priority, ticket.priorityColor)
+  const typeTone = getTypeToneStyle(ticket.type, ticket.typeColor).textTone
+  const statusTone = getStatusToneStyle(ticket.status, ticket.statusColor).border
+  const prioTone = getPriorityToneStyle(ticket.priority, ticket.priorityColor).textTone
   const externalUrl = workPackageUrl(baseUrl, ticket.id)
+  const openExternal = externalUrl
+    ? () => {
+        void shell.openExternal(externalUrl)
+      }
+    : undefined
 
   const parentWp = ticket.parentId
     ? allWorkPackages.find((w) => w.id === ticket.parentId)
@@ -164,24 +114,26 @@ export function TicketDetailView({
       <Stack gap="sm">
         <Row justify="between" align="center" gap="xs">
           <Row gap="xs" align="center">
-            <Text size="xs" weight="semibold" tone={typeStyle.textTone}>
+            <Text size="xs" weight="semibold" tone={typeTone}>
               {(ticket.type || 'Task').toUpperCase()}
             </Text>
-            <Text size="xs" muted>
-              #{ticket.id}
-            </Text>
+            {openExternal ? (
+              <Text size="xs">
+                <Link onPress={openExternal}>{`#${ticket.id}`}</Link>
+              </Text>
+            ) : (
+              <Text size="xs" muted>{`#${ticket.id}`}</Text>
+            )}
           </Row>
           <Row gap="xs" align="center">
-            {externalUrl ? (
+            {openExternal ? (
               <IconButton
                 size="xs"
                 variant="ghost"
                 icon="open-external"
                 label={tr('detail.openInOpenProject')}
                 tooltip={tr('detail.openInOpenProject')}
-                onPress={() => {
-                  void shell.openExternal(externalUrl)
-                }}
+                onPress={openExternal}
               />
             ) : null}
             <IconButton
@@ -199,41 +151,32 @@ export function TicketDetailView({
           <Text size="xs" muted>
             {'↑ '}
             <Link onPress={() => selectTicket(ticket.parentId!)}>
-              {parentSubject
-                ? `#${ticket.parentId} ${parentSubject}`
-                : `#${ticket.parentId}`}
+              {parentSubject ? `#${ticket.parentId} ${parentSubject}` : `#${ticket.parentId}`}
             </Link>
           </Text>
         ) : null}
 
         <Heading level={2}>{ticket.subject}</Heading>
 
-        <Row gap="xs" align="end" wrap>
-          <Box minWidth={150}>
-            <Select
-              label={tr('detail.statusLabel')}
-              labelHidden
-              value={statusSelectValue}
-              options={statusOptions.map((o) => ({ value: o.value, label: o.label }))}
-              onChange={(val) => set(nextStatusDraftAtom, val)}
-            />
-          </Box>
-          <Button
-            size="sm"
-            icon="agent"
-            tone="accent"
-            variant={launchPanelOpen ? 'solid' : 'outline'}
-            onPress={() => set(launchPanelOpenAtom, !launchPanelOpen)}
-          >
-            {tr('ticket.launchAgent')}
-          </Button>
+        <Row gap="xs" align="center" wrap>
+          <Badge tone={statusTone}>{ticket.status}</Badge>
+          {ticket.priority ? <Badge tone={prioTone}>{ticket.priority}</Badge> : null}
+          {ticket.updatedAt ? (
+            <Text size="xs" muted>
+              {tr('detail.updatedOn', { date: formatShortDate(ticket.updatedAt) })}
+            </Text>
+          ) : null}
         </Row>
 
-        {ticket.updatedAt ? (
-          <Text size="xs" muted>
-            {tr('detail.updatedOn', { date: formatShortDate(ticket.updatedAt) })}
-          </Text>
-        ) : null}
+        <Button
+          size="sm"
+          icon="branch"
+          tone="accent"
+          variant={launchPanelOpen ? 'outline' : 'solid'}
+          onPress={() => set(launchPanelOpenAtom, !launchPanelOpen)}
+        >
+          {tr('ticket.launchAgent')}
+        </Button>
 
         {launchPanelOpen
           ? LaunchAgentDrawer({ locale, ticket, workspaces, detectedAgents })
@@ -249,7 +192,7 @@ export function TicketDetailView({
               <Stack gap="xs">
                 {SectionTitle(tr('ticket.description'))}
                 {ticket.description ? (
-                  <Box maxHeight={240} scroll="y" padding="xs">
+                  <Box maxHeight={320} scroll="y" padding="xs">
                     <Markdown content={ticket.description} />
                   </Box>
                 ) : (
@@ -261,20 +204,13 @@ export function TicketDetailView({
 
               <Stack gap="xs">
                 {SectionTitle(tr('detail.sectionPeople'))}
-                <Box columns={2} gap="xs">
-                  <Select
-                    label={tr('ticket.assignee')}
-                    value={assigneeDraft}
-                    options={ticketMemberOptions}
-                    onChange={(val) => set(nextAssigneeDraftAtom, val)}
-                  />
-                  <Select
-                    label={tr('ticket.responsible')}
-                    value={responsibleDraft}
-                    options={ticketMemberOptions}
-                    onChange={(val) => set(nextResponsibleDraftAtom, val)}
-                  />
-                </Box>
+                <KeyValue
+                  label={tr('detail.sectionPeople')}
+                  items={[
+                    { label: tr('ticket.assignee'), value: personOrDash(ticket.assignee) },
+                    { label: tr('ticket.responsible'), value: personOrDash(ticket.responsible) }
+                  ]}
+                />
               </Stack>
 
               <Stack gap="xs">
@@ -282,9 +218,9 @@ export function TicketDetailView({
                 <KeyValue
                   label={tr('detail.sectionDetails')}
                   items={[
-                    { label: tr('detail.type'), value: ticket.type, tone: typeStyle.textTone },
-                    { label: tr('detail.status'), value: ticket.status, tone: statusStyle.textTone },
-                    { label: tr('detail.priority'), value: ticket.priority, tone: prioStyle.textTone },
+                    { label: tr('detail.type'), value: ticket.type, tone: typeTone },
+                    { label: tr('detail.status'), value: ticket.status, tone: statusTone },
+                    { label: tr('detail.priority'), value: ticket.priority, tone: prioTone },
                     { label: tr('detail.project'), value: ticket.project },
                     {
                       label: tr('detail.updated'),
@@ -293,38 +229,10 @@ export function TicketDetailView({
                   ]}
                 />
               </Stack>
-
-              <Row gap="xs" align="center">
-                <Button
-                  size="xs"
-                  tone="accent"
-                  icon="check"
-                  disabled={!isDirty}
-                  onPress={() => saveTicketChanges(ticket.id)}
-                >
-                  {tr('detail.save')}
-                </Button>
-                {isDirty ? (
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    onPress={() => {
-                      set(nextStatusDraftAtom, ticket.status)
-                      set(nextAssigneeDraftAtom, currentAssignee)
-                      set(nextResponsibleDraftAtom, currentResponsible)
-                    }}
-                  >
-                    {tr('detail.discard')}
-                  </Button>
-                ) : null}
-              </Row>
             </Stack>
           </Tab>
 
-          <Tab
-            value="activity"
-            label={tr('detail.tabActivity', { count: activities.length })}
-          >
+          <Tab value="activity" label={tr('detail.tabActivity', { count: activities.length })}>
             <Stack gap="sm">
               <Textarea
                 label={tr('ticket.comment')}
@@ -351,12 +259,7 @@ export function TicketDetailView({
               ) : (
                 <Stack gap="xs">
                   {sortedActivities.map((act) => (
-                    <Box
-                      key={String(act.id)}
-                      border="neutral"
-                      radius="sm"
-                      padding="xs"
-                    >
+                    <Box key={String(act.id)} border="neutral" radius="sm" padding="xs">
                       <Stack gap="xs">
                         <Row justify="between" align="center" gap="xs">
                           <Text size="xs" weight="semibold">
@@ -375,10 +278,7 @@ export function TicketDetailView({
             </Stack>
           </Tab>
 
-          <Tab
-            value="relations"
-            label={tr('detail.tabRelations', { count: relationCount })}
-          >
+          <Tab value="relations" label={tr('detail.tabRelations', { count: relationCount })}>
             <Stack gap="sm">
               {ticket.parentId ? (
                 <Stack gap="xs">
@@ -388,9 +288,7 @@ export function TicketDetailView({
                       key={`parent-${ticket.parentId}`}
                       icon="layers"
                       title={`#${ticket.parentId} ${parentSubject}`.trim()}
-                      description={
-                        parentWp ? `${parentWp.type} · ${parentWp.status}` : undefined
-                      }
+                      description={parentWp ? `${parentWp.type} · ${parentWp.status}` : undefined}
                       onPress={() => selectTicket(ticket.parentId!)}
                     />
                   </List>
@@ -404,13 +302,7 @@ export function TicketDetailView({
                       <ListItem
                         key={String(child.id)}
                         title={`↳ #${child.id} ${child.subject}`}
-                        description={[
-                          child.type,
-                          child.status,
-                          child.assignee && child.assignee !== 'Unassigned'
-                            ? child.assignee
-                            : tr('filters.unassigned')
-                        ].join(' · ')}
+                        description={[child.type, child.status, personOrDash(child.assignee)].join(' · ')}
                         onPress={() => selectTicket(child.id)}
                       />
                     ))}
@@ -420,20 +312,6 @@ export function TicketDetailView({
                     {tr('detail.noChildren')}
                   </Text>
                 )}
-                {canCreateSubtask ? (
-                  <Row>
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      icon="add"
-                      onPress={() =>
-                        startCreatingSubtask(ticket.projectIdentifier, ticket.id)
-                      }
-                    >
-                      {tr('ticket.addSubtask')}
-                    </Button>
-                  </Row>
-                ) : null}
               </Stack>
             </Stack>
           </Tab>

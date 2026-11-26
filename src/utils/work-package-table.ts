@@ -1,4 +1,3 @@
-import type { TableColumn, TableRow, TableSort } from 'orca'
 import type {
   OpenProjectPriorityItem,
   OpenProjectStatusItem,
@@ -6,27 +5,7 @@ import type {
 } from '../protocol'
 import { buildHierarchicalTicketList } from './openproject-tones'
 
-export type WorkPackageColumnKey =
-  | 'id'
-  | 'type'
-  | 'subject'
-  | 'status'
-  | 'assignee'
-  | 'priority'
-
-/** OpenProject's default work package table columns, ordered as OpenProject shows them. */
-export function buildWorkPackageColumns(
-  labels: Record<WorkPackageColumnKey, string>
-): TableColumn[] {
-  return [
-    { key: 'id', label: labels.id, width: 'xs', sortable: true },
-    { key: 'type', label: labels.type, width: 'sm', hideBelow: 'md', sortable: true },
-    { key: 'subject', label: labels.subject, width: 'auto', minWidth: 'md', sortable: true },
-    { key: 'status', label: labels.status, width: 'sm', sortable: true },
-    { key: 'assignee', label: labels.assignee, width: 'sm', hideBelow: 'md', sortable: true },
-    { key: 'priority', label: labels.priority, width: 'sm', hideBelow: 'md', sortable: true }
-  ]
-}
+export type WorkPackageSort = { column: string; direction: 'asc' | 'desc' }
 
 export interface WorkPackageOrderContext {
   statuses: OpenProjectStatusItem[]
@@ -85,7 +64,7 @@ export interface OrderedWorkPackage {
  */
 export function orderWorkPackages(
   workPackages: OpenProjectWorkPackage[],
-  sort: TableSort | null,
+  sort: WorkPackageSort | null,
   ctx: WorkPackageOrderContext
 ): OrderedWorkPackage[] {
   if (!sort) {
@@ -101,26 +80,6 @@ export function orderWorkPackages(
         factor * (compareWorkPackages(a, b, sort.column, ctx) || a.id - b.id)
     )
     .map((wp) => ({ wp, depth: 0 }))
-}
-
-const INDENT = '   '
-
-export function buildWorkPackageRows(
-  ordered: OrderedWorkPackage[],
-  unassignedLabel: string
-): TableRow[] {
-  return ordered.map(({ wp, depth }) => ({
-    key: String(wp.id),
-    cells: {
-      id: wp.id,
-      type: (wp.type || '').toUpperCase(),
-      subject:
-        depth > 0 ? `${INDENT.repeat(depth - 1)}└ ${wp.subject}` : wp.subject,
-      status: wp.status,
-      assignee: displayAssignee(wp) || unassignedLabel,
-      priority: wp.priority || ''
-    }
-  }))
 }
 
 export function workPackageUrl(baseUrl: string, id: number): string | null {

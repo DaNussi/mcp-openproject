@@ -5,10 +5,7 @@ import {
   matchBestWorkspaceForTicket
 } from '../openproject-api'
 import type { OpenProjectStateSnapshot } from '../protocol'
-import {
-  isStatusClosedName,
-  resolvePrincipalIdString
-} from '../utils/openproject-tones'
+import { isStatusClosedName } from '../utils/openproject-tones'
 
 export const localeAtom = atom<UiLocale>('openproject.locale', 'en', {
   persist: 'plugin'
@@ -52,12 +49,10 @@ export const tableSortAtom = atom<{
 } | null>('openproject.tableSort', null, { persist: 'plugin' })
 export const targetWorkspaceIdAtom = atom<string>('')
 export const launchPanelOpenAtom = atom<boolean>(false)
-export const launchCreateWorktreeAtom = atom<boolean>(false)
+/** Creating a workspace for the ticket is the main use case, so a new worktree is the default. */
+export const launchCreateWorktreeAtom = atom<boolean>(true)
 export const launchBranchDraftAtom = atom<string>('')
 
-export const nextStatusDraftAtom = atom<string>('')
-export const nextAssigneeDraftAtom = atom<string>('0')
-export const nextResponsibleDraftAtom = atom<string>('0')
 export const commentDraftAtom = atom<string>('')
 export const lastSyncedTicketIdAtom = atom<number | null>(null)
 export const feedbackMessageAtom = atom<{
@@ -115,7 +110,6 @@ export function syncDraftsFromSnapshot(
   if (snapshot.selectedTicket) {
     const prevSyncedId = read(lastSyncedTicketIdAtom)
     if (forceTicketDraftSync || prevSyncedId !== snapshot.selectedTicket.id) {
-      const principals = snapshot.principals ?? []
       const bestWs = matchBestWorkspaceForTicket(
         snapshot.selectedTicket,
         snapshot.workspaces ?? []
@@ -127,23 +121,6 @@ export function syncDraftsFromSnapshot(
         formatWorktreeBranchSlug(
           snapshot.selectedTicket.id,
           snapshot.selectedTicket.subject
-        )
-      )
-      set(nextStatusDraftAtom, snapshot.selectedTicket.status)
-      set(
-        nextAssigneeDraftAtom,
-        resolvePrincipalIdString(
-          snapshot.selectedTicket.assigneeId,
-          snapshot.selectedTicket.assignee,
-          principals
-        )
-      )
-      set(
-        nextResponsibleDraftAtom,
-        resolvePrincipalIdString(
-          snapshot.selectedTicket.responsibleId,
-          snapshot.selectedTicket.responsible,
-          principals
         )
       )
     }
@@ -274,7 +251,6 @@ export async function selectTicket(id: number): Promise<void> {
 
     const cachedWp = currentSnapshot?.workPackages.find((wp) => wp.id === id)
     if (currentSnapshot && cachedWp) {
-      const principals = currentSnapshot.principals ?? []
       const bestWs = matchBestWorkspaceForTicket(
         cachedWp,
         currentSnapshot.workspaces ?? []
@@ -290,23 +266,6 @@ export async function selectTicket(id: number): Promise<void> {
         selectedTicket: cachedWp,
         activities: []
       })
-      set(nextStatusDraftAtom, cachedWp.status)
-      set(
-        nextAssigneeDraftAtom,
-        resolvePrincipalIdString(
-          cachedWp.assigneeId,
-          cachedWp.assignee,
-          principals
-        )
-      )
-      set(
-        nextResponsibleDraftAtom,
-        resolvePrincipalIdString(
-          cachedWp.responsibleId,
-          cachedWp.responsible,
-          principals
-        )
-      )
     }
 
     await plugin.request('openproject.workPackages.get', { id })
@@ -320,82 +279,18 @@ export async function selectTicket(id: number): Promise<void> {
   }
 }
 
-export function buildUpdatePayload(
-  ticketId: number,
-  confirm: boolean
-): {
-  id: number
-  status?: string
-  assigneeId?: number | null
-  responsibleId?: number | null
-  comment?: string
-  confirm: boolean
-} {
-  const snapshot = read(stateAtom)
-  const currentTicket = snapshot?.selectedTicket
-  const principals = snapshot?.principals ?? []
-  const assigneeRaw = Number(read(nextAssigneeDraftAtom) || '0')
-  const responsibleRaw = Number(read(nextResponsibleDraftAtom) || '0')
-  const currentAssignee = Number(
-    resolvePrincipalIdString(
-      currentTicket?.assigneeId,
-      currentTicket?.assignee,
-      principals
-    )
-  )
-  const currentResponsible = Number(
-    resolvePrincipalIdString(
-      currentTicket?.responsibleId,
-      currentTicket?.responsible,
-      principals
-    )
-  )
-
-  const payload: {
-    id: number
-    status?: string
-    assigneeId?: number | null
-    responsibleId?: number | null
-    comment?: string
-    confirm: boolean
-  } = {
-    id: ticketId,
-    status: read(nextStatusDraftAtom),
-    comment: read(commentDraftAtom),
-    confirm
-  }
-  if (assigneeRaw !== currentAssignee) {
-    payload.assigneeId = assigneeRaw > 0 ? assigneeRaw : null
-  }
-  if (responsibleRaw !== currentResponsible) {
-    payload.responsibleId = responsibleRaw > 0 ? responsibleRaw : null
-  }
-  return payload
-}
-
-/** Saves status / assignee / accountable drafts without posting the comment draft. */
-export async function saveTicketChanges(ticketId: number): Promise<void> {
-  const payload = buildUpdatePayload(ticketId, true)
-  delete payload.comment
-  await runTicketUpdate(ticketId, payload, false)
-}
-
-/** Posts only the comment draft, leaving attribute drafts untouched. */
+/** The plugin's only write on an existing work package: post a comment. */
 export async function postTicketComment(ticketId: number): Promise<void> {
   const comment = read(commentDraftAtom).trim()
   if (!comment) return
-  await runTicketUpdate(ticketId, { id: ticketId, comment, confirm: true }, true)
-}
-
-async function runTicketUpdate(
-  ticketId: number,
-  payload: ReturnType<typeof buildUpdatePayload>,
-  clearComment: boolean
-): Promise<void> {
   const locale = read(localeAtom)
   try {
-    const res = await plugin.request('openproject.workPackages.update', payload)
-    if (clearComment) set(commentDraftAtom, '')
+    const res = await plugin.request('openproject.workPackages.update', {
+      id: ticketId,
+      comment,
+      confirm: true
+    })
+    set(commentDraftAtom, '')
     set(feedbackMessageAtom, {
       tone: 'success',
       text:
@@ -403,6 +298,7 @@ async function runTicketUpdate(
           ? t(locale, 'feedback.updatedTicket', { id: ticketId })
           : res.summary
     })
+    await plugin.request('openproject.workPackages.get', { id: ticketId })
     const snapshot = await plugin.request('openproject.state.get')
     syncDraftsFromSnapshot(snapshot)
   } catch (err) {
@@ -412,6 +308,7 @@ async function runTicketUpdate(
     })
   }
 }
+
 
 
 

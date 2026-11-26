@@ -2,8 +2,10 @@ import { assert, mockHost, mount, test } from 'orca/testing'
 import * as panel from './panel'
 import type { OpenProjectStateSnapshot, OpenProjectWorkPackage } from './protocol'
 
-const TABLE = { label: 'Work packages', type: 'Table' }
 const DETAIL_TABS = { label: 'Work package details' }
+const ROW_IDS = { type: 'Link', text: /^#\d+$/ }
+/** Each list row wraps its subject in a List labelled with the row's #ID. */
+const ROW_LISTS = { type: 'List', label: /^#\d+$/ }
 
 function workPackage(
   overrides: Partial<OpenProjectWorkPackage> & { id: number; subject: string }
@@ -33,6 +35,7 @@ function createInitialSnapshot(): OpenProjectStateSnapshot {
     type: 'Bug',
     priority: 'High',
     assignee: 'Alex Dev',
+    responsible: 'Sam Lead',
     lockVersion: 2
   })
   return {
@@ -76,7 +79,15 @@ function selectById(snapshot: OpenProjectStateSnapshot) {
   }
 }
 
-test('lists work packages in an OpenProject-style table and saves status from the split view', async () => {
+/** The work package ids in the order the list draws them. */
+function rowIds(view: { findAll(q: object): unknown[] }): string[] {
+  return view.findAll(ROW_LISTS).map((el) => {
+    const match = /#(\d+)/.exec(JSON.stringify(el))
+    return match ? match[1] : ''
+  })
+}
+
+test('shows colored work package rows and a read-only detail view where only comments are written', async () => {
   const snapshot = createInitialSnapshot()
   const updates: Array<Record<string, unknown>> = []
   let launchedTicketId = 0
@@ -84,15 +95,14 @@ test('lists work packages in an OpenProject-style table and saves status from th
   const host = mockHost({
     requests: {
       'openproject.state.get': () => snapshot,
+      'openproject.workPackages.get': selectById(snapshot),
       'openproject.workPackages.update': (input) => {
         updates.push({ ...input })
-        if (input.status) snapshot.selectedTicket!.status = input.status
-        snapshot.workPackages[0] = snapshot.selectedTicket!
         return {
           preview: false,
           confirmed: true,
           action: 'update_work_package',
-          summary: `[CONFIRMED] Updated #${input.id} to ${snapshot.selectedTicket!.status}`,
+          summary: `[CONFIRMED] Updated #${input.id}`,
           changes: {},
           workPackage: snapshot.selectedTicket!
         }
@@ -110,27 +120,30 @@ test('lists work packages in an OpenProject-style table and saves status from th
   })
 
   const view = await mount(panel, { host })
-  assert.deepEqual(view.rowsOf(TABLE), ['1428'])
-  assert.deepEqual(view.columnsOf(TABLE), ['id', 'type', 'subject', 'status', 'assignee', 'priority'])
-  assert.deepEqual(view.columnsOf(TABLE, { width: 420 }), ['id', 'subject', 'status'])
+  assert.deepEqual(rowIds(view), ['1428'])
+  assert.ok(view.find({ type: 'ListItem', text: /Fix OAuth token refresh/ }))
   assert.ok(view.find({ type: 'Heading', text: 'Fix OAuth token refresh' }))
 
-  // Save stays disabled until an attribute differs, then sends only the attribute change.
-  await view.select({ label: 'Status' }, 'In Review')
-  await view.press({ text: 'Save' })
-  assert.equal(updates.length, 1)
-  assert.equal(updates[0].status, 'In Review')
-  assert.equal(updates[0].comment, undefined)
-  assert.ok(view.find({ text: /\[CONFIRMED\] Updated #1428/ }))
+  // People are shown, not editable: no Assignee / Accountable / Status pickers.
+  const people = JSON.stringify(view.find({ type: 'KeyValue', label: 'People' }))
+  assert.ok(people.includes('Alex Dev') && people.includes('Sam Lead'))
+  assert.equal(view.find({ type: 'Select', label: 'Assignee' }), null)
+  assert.equal(view.find({ type: 'Select', label: 'Accountable' }), null)
+  assert.equal(view.find({ type: 'Select', label: 'Status' }), null)
 
-  // Comment from the Activity tab posts only the comment.
+  // The row's #ID opens the work package in OpenProject (a press, so Orca allows it).
+  await view.press(view.findAll(ROW_IDS)[0] as never)
+  assert.deepEqual(view.refusals, [])
+
+  // Commenting is the only write, and it sends only the comment.
   await view.select(DETAIL_TABS, 'activity')
   await view.type({ label: 'Comment' }, 'Reproduced on staging.')
   await view.press({ type: 'Button', text: 'Comment' })
-  assert.equal(updates.length, 2)
-  assert.deepEqual(updates[1], { id: 1428, comment: 'Reproduced on staging.', confirm: true })
+  assert.deepEqual(updates, [{ id: 1428, comment: 'Reproduced on staging.', confirm: true }])
+  assert.ok(view.find({ text: /\[CONFIRMED\] Updated #1428/ }))
 
-  await view.press({ text: 'Launch Agent' })
+  await view.press({ type: 'Button', text: 'Create workspace' })
+  await view.press({ text: 'Existing Workspace' })
   await view.press({ text: 'Start Agent' })
   assert.equal(launchedTicketId, 1428)
   assert.ok(view.find({ text: /op-1428-fix-oauth-token-refresh/ }))
@@ -140,7 +153,7 @@ test('lists work packages in an OpenProject-style table and saves status from th
   await view.unmount()
 })
 
-test('selecting a row opens its split view, deselecting closes it, and sorting reorders rows', async () => {
+test('pressing a row opens its details, close hides them, and Sort reorders rows', async () => {
   const snapshot = createInitialSnapshot()
   snapshot.workPackages.push(
     workPackage({ id: 1429, subject: 'Add warehouse inventory UI', description: 'Inline split test.' })
@@ -154,19 +167,21 @@ test('selecting a row opens its split view, deselecting closes it, and sorting r
   })
 
   const view = await mount(panel, { host })
-  assert.deepEqual(view.valueOf(TABLE), ['1428'])
 
-  await view.selectRows(TABLE, ['1429'])
+  await view.press({ type: 'ListItem', text: /Add warehouse inventory UI/ })
   assert.ok(view.find({ type: 'Heading', text: 'Add warehouse inventory UI' }))
   assert.ok(view.find({ text: /Inline split test/ }))
 
-  await view.selectRows(TABLE, [])
-  assert.equal(view.find({ text: 'Launch Agent' }), null)
+  await view.press({ label: 'Close' })
+  assert.equal(view.find({ type: 'Button', text: 'Create workspace' }), null)
 
-  await view.sort(TABLE, 'subject')
-  assert.deepEqual(view.rowsOf(TABLE), ['1429', '1428'])
-  await view.sort(TABLE, 'subject')
-  assert.deepEqual(view.rowsOf(TABLE), ['1428', '1429'])
+  await view.press({ type: 'Button', text: 'Filter' })
+  await view.select({ label: 'Sort' }, 'subject:asc')
+  assert.deepEqual(rowIds(view), ['1429', '1428'])
+  await view.select({ label: 'Sort' }, 'id:asc')
+  assert.deepEqual(rowIds(view), ['1428', '1429'])
+  await view.select({ label: 'Sort' }, 'id:desc')
+  assert.deepEqual(rowIds(view), ['1429', '1428'])
 
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
@@ -277,14 +292,14 @@ test('filter drawer changes page size and the Create button opens the create for
   await view.press({ text: 'Create Task' })
   assert.equal(createdSubject, 'Optimize API pagination cache')
   assert.ok(view.find({ type: 'Heading', text: 'Optimize API pagination cache' }))
-  assert.ok(view.rowsOf(TABLE).includes('1500'))
+  assert.ok(rowIds(view).includes('1500'))
 
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
   await view.unmount()
 })
 
-test('relations tab navigates parent and children and launch pre-selects the matching workspace', async () => {
+test('relations tab navigates parent and children; Create workspace defaults to a new worktree', async () => {
   const snapshot = createInitialSnapshot()
   snapshot.projects.push({
     id: 2,
@@ -345,26 +360,30 @@ test('relations tab navigates parent and children and launch pre-selects the mat
 
   const view = await mount(panel, { host })
 
-  // Hierarchy order: the child sits right under its parent.
-  assert.deepEqual(view.rowsOf(TABLE), ['123', '124', '1428'])
+  // Hierarchy order: the child sits right under its parent, indented.
+  assert.deepEqual(rowIds(view), ['123', '124', '1428'])
+  assert.ok(view.find({ type: 'ListItem', text: /└ Implement responsive sidebar layout/ }))
 
   await view.select(DETAIL_TABS, 'relations')
   await view.press({ text: /↳ #124 Implement responsive sidebar layout/ })
   assert.ok(view.find({ type: 'Heading', text: 'Implement responsive sidebar layout' }))
   assert.ok(view.find({ text: /Child task description/ }))
 
-  await view.press({ text: 'Launch Agent' })
-  await view.press({ text: 'Start Agent' })
-  assert.equal(launchedWsId, 'ws-frontend')
-  assert.equal(launchedCreateWorktree, false)
-
-  await view.press({ text: 'Launch Agent' })
-  await view.press({ text: 'New Worktree' })
+  // New worktree is the default: Create workspace opens straight into it.
+  await view.press({ type: 'Button', text: 'Create workspace' })
   assert.ok(view.find({ label: 'Target Repository' }))
   await view.type({ label: 'Branch Name' }, 'op-124-responsive-sidebar', { replace: true })
   await view.press({ text: 'Create Worktree & Start' })
   assert.equal(launchedCreateWorktree, true)
   assert.equal(launchedBranchName, 'op-124-responsive-sidebar')
+  assert.equal(launchedWsId, 'ws-frontend')
+
+  // Existing workspace mode pre-selects the matching acme-frontend worktree.
+  await view.press({ type: 'Button', text: 'Create workspace' })
+  await view.press({ text: 'Existing Workspace' })
+  await view.press({ text: 'Start Agent' })
+  assert.equal(launchedWsId, 'ws-frontend')
+  assert.equal(launchedCreateWorktree, false)
 
   // The parent breadcrumb above the subject jumps back to #123.
   await view.press({ type: 'Link', text: '#123 Phase 2 dashboard redesign' })

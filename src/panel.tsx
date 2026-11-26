@@ -10,7 +10,6 @@ import {
   Spinner,
   Stack,
   Tab,
-  Table,
   Tabs,
   Text,
   type PanelContext
@@ -18,6 +17,7 @@ import {
 import { CreateTicketView } from './components/CreateTicketView'
 import { SetupView } from './components/SetupView'
 import { TicketDetailView } from './components/TicketDetailView'
+import { WorkPackageList } from './components/WorkPackageList'
 import {
   WorkPackageHeader,
   WorkPackageToolbar,
@@ -35,7 +35,6 @@ import {
   projectFilterAtom,
   scopeModeAtom,
   searchQueryAtom,
-  selectTicket,
   stateAtom,
   statusFilterAtom,
   syncDraftsFromSnapshot,
@@ -47,11 +46,7 @@ import {
   isStatusClosedName,
   UNUSED_BOILERPLATE_STATUSES
 } from './utils/openproject-tones'
-import {
-  buildWorkPackageColumns,
-  buildWorkPackageRows,
-  orderWorkPackages
-} from './utils/work-package-table'
+import { orderWorkPackages } from './utils/work-package-table'
 
 export function setup(ctx: PanelContext): void {
   ctx.subscriptions.push(
@@ -77,23 +72,6 @@ const DEFAULT_PRIORITIES = [
   { id: 3, name: 'High', color: '#F59F00' },
   { id: 4, name: 'Immediate', color: '#FA5252' }
 ]
-
-const DEFAULT_STATUS_OPTIONS = [
-  'New',
-  'In specification',
-  'Specified',
-  'Confirmed',
-  'To be scheduled',
-  'Scheduled',
-  'In progress',
-  'Developed',
-  'In testing',
-  'Tested',
-  'Test failed',
-  'Closed',
-  'On hold',
-  'Rejected'
-].map((name) => ({ value: name, label: name }))
 
 const PAGE_SIZE_STEPS = ['50', '100', '200']
 
@@ -191,11 +169,6 @@ export default function Panel() {
     statusFilterOptions.push({ value: statusFilter, label: statusFilter })
   }
 
-  const statusTransitionOptions =
-    discoveredStatuses.length > 0
-      ? discoveredStatuses.map((s) => ({ value: s.name, label: s.name, color: s.color }))
-      : DEFAULT_STATUS_OPTIONS
-
   const discoveredPrincipals = new Map<string, string>()
   for (const p of principals) {
     if (p.id && p.name) discoveredPrincipals.set(String(p.id), p.name)
@@ -280,32 +253,6 @@ export default function Panel() {
     (nextPageSize !== undefined && allWorkPackages.length >= pageLimit)
 
   const detailOpen = Boolean(selectedTicket && ticketDetailExpanded)
-  const rows = buildWorkPackageRows(visible, '—')
-  const columns = buildWorkPackageColumns({
-    id: tr('wp.colId'),
-    type: tr('wp.colType'),
-    subject: tr('wp.colSubject'),
-    status: tr('wp.colStatus'),
-    assignee: tr('wp.colAssignee'),
-    priority: tr('wp.colPriority')
-  })
-
-  const openRow = (key: string | undefined) => {
-    if (!key) {
-      set(ticketDetailExpandedAtom, false)
-      return
-    }
-    const id = Number(key)
-    if (Number.isFinite(id) && id > 0) void selectTicket(id)
-  }
-
-  const canWriteSelected = selectedTicket
-    ? writableProjects.some(
-        (p) =>
-          p.identifier === selectedTicket.projectIdentifier ||
-          p.name === selectedTicket.project
-      )
-    : false
 
   const listBody =
     snapshot === null ? (
@@ -325,22 +272,17 @@ export default function Panel() {
         description={tr('tickets.emptyDesc')}
       />
     ) : (
-      <Table
-        label={tr('wp.tableLabel')}
-        columns={columns}
-        rows={rows}
-        sort={tableSort ?? undefined}
-        selectionMode="single"
-        selected={detailOpen && selectedTicket ? [String(selectedTicket.id)] : []}
-        maxHeight={detailOpen ? 'sm' : 'lg'}
-        hasMore={hasMore}
-        onSortChange={(next) => set(tableSortAtom, next)}
-        onSelectionChange={({ keys }) => openRow(keys[0])}
-        onRowAction={({ key }) => openRow(key)}
-        onLoadMore={() => {
+      WorkPackageList({
+        locale,
+        rows: visible,
+        baseUrl: snapshot.config.baseUrl,
+        selectedId: detailOpen && selectedTicket ? selectedTicket.id : null,
+        compact: detailOpen,
+        hasMore,
+        onLoadMore: () => {
           if (nextPageSize) void changePageSize(nextPageSize)
-        }}
-      />
+        }
+      })
     )
 
   return (
@@ -383,6 +325,7 @@ export default function Panel() {
               filterPanelOpen,
               activeFilterCount: drawerFilterCount,
               canReset: hasAnyFilter,
+              sort: tableSort,
               priorities,
               projectOptions,
               statusFilterOptions
@@ -396,11 +339,7 @@ export default function Panel() {
                   ticket: selectedTicket,
                   baseUrl: snapshot?.config.baseUrl ?? '',
                   allWorkPackages,
-                  canCreateSubtask: canWriteSelected,
                   activities,
-                  principals,
-                  statusTransitionOptions,
-                  memberOptions,
                   workspaces,
                   detectedAgents
                 })

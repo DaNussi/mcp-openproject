@@ -22,7 +22,8 @@ import {
   refreshAll,
   resetAllFilters,
   scopeModeAtom,
-  searchQueryAtom
+  searchQueryAtom,
+  tableSortAtom
 } from '../state/panel-state'
 
 export type WorkPackageView = 'open' | 'mine' | 'closed'
@@ -102,12 +103,37 @@ export interface WorkPackageToolbarProps {
   activeFilterCount: number
   /** Anything differs from the defaults: view, project, search, drawer filters or sort. */
   canReset: boolean
+  sort: { column: string; direction: 'asc' | 'desc' } | null
   priorities: OpenProjectPriorityItem[]
   projectOptions: Array<{ value: string; label: string }>
   statusFilterOptions: Array<{ value: string; label: string }>
 }
 
 const PAGE_SIZES = ['50', '100', '200'] as const
+
+const SORT_KEYS = [
+  'hierarchy',
+  'id:desc',
+  'id:asc',
+  'subject:asc',
+  'type:asc',
+  'status:asc',
+  'priority:desc',
+  'assignee:asc'
+] as const
+
+function sortValue(sort: WorkPackageToolbarProps['sort']): string {
+  return sort ? `${sort.column}:${sort.direction}` : 'hierarchy'
+}
+
+function changeSort(value: string): void {
+  if (value === 'hierarchy') {
+    set(tableSortAtom, null)
+    return
+  }
+  const [column, direction] = value.split(':')
+  set(tableSortAtom, { column, direction: direction === 'desc' ? 'desc' : 'asc' })
+}
 
 function changeView(next: string): void {
   if (next === 'mine') {
@@ -198,7 +224,16 @@ export function WorkPackageToolbar(props: WorkPackageToolbarProps) {
                 onChange={(val) => set(priorityFilterAtom, val)}
               />
             </Box>
-            <Row justify="between" align="end" gap="xs" wrap>
+            <Box columns={2} gap="xs">
+              <Select
+                label={tr('wp.sortLabel')}
+                value={sortValue(props.sort)}
+                options={SORT_KEYS.map((key) => ({
+                  value: key,
+                  label: tr(`wp.sort.${key}`)
+                }))}
+                onChange={changeSort}
+              />
               <Select
                 label={tr('filters.pageSizeLabel')}
                 value={props.pageSize}
@@ -210,6 +245,8 @@ export function WorkPackageToolbar(props: WorkPackageToolbarProps) {
                   if (val !== props.pageSize) void changePageSize(val)
                 }}
               />
+            </Box>
+            <Row justify="end">
               <Button
                 size="xs"
                 variant="ghost"
