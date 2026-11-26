@@ -1,11 +1,8 @@
 import {
-  Box,
   Button,
   Callout,
   Card,
   EmptyState,
-  List,
-  ListItem,
   plugin,
   read,
   Row,
@@ -13,22 +10,25 @@ import {
   Spinner,
   Stack,
   Tab,
+  Table,
   Tabs,
   Text,
   type PanelContext
 } from 'orca'
 import { CreateTicketView } from './components/CreateTicketView'
-import { HeaderBar } from './components/HeaderBar'
 import { SetupView } from './components/SetupView'
 import { TicketDetailView } from './components/TicketDetailView'
-import { TicketFilters } from './components/TicketFilters'
+import {
+  WorkPackageHeader,
+  WorkPackageToolbar,
+  type WorkPackageView
+} from './components/WorkPackageToolbar'
 import { createTranslator } from './i18n'
-import type { OpenProjectWorkPackage } from './protocol'
 import {
   activeTabAtom,
-  collapsedParentIdsAtom,
+  changePageSize,
   feedbackMessageAtom,
-  focusAnchorTicketIdAtom,
+  filterPanelOpenAtom,
   localeAtom,
   pageSizeAtom,
   priorityFilterAtom,
@@ -39,18 +39,19 @@ import {
   stateAtom,
   statusFilterAtom,
   syncDraftsFromSnapshot,
-  ticketDetailExpandedAtom,
-  toggleParentChildrenCollapsed
+  tableSortAtom,
+  ticketDetailExpandedAtom
 } from './state/panel-state'
 import {
-  buildHierarchicalTicketList,
   DEFAULT_OPENPROJECT_TYPES,
-  formatWorkPackageRowMeta,
-  getStatusToneStyle,
-  type HierarchicalTicketRow,
   isStatusClosedName,
   UNUSED_BOILERPLATE_STATUSES
 } from './utils/openproject-tones'
+import {
+  buildWorkPackageColumns,
+  buildWorkPackageRows,
+  orderWorkPackages
+} from './utils/work-package-table'
 
 export function setup(ctx: PanelContext): void {
   ctx.subscriptions.push(
@@ -70,6 +71,36 @@ export function setup(ctx: PanelContext): void {
     })
 }
 
+const DEFAULT_PRIORITIES = [
+  { id: 1, name: 'Low', color: '#C5F6FA' },
+  { id: 2, name: 'Normal', color: '#74C0FC' },
+  { id: 3, name: 'High', color: '#F59F00' },
+  { id: 4, name: 'Immediate', color: '#FA5252' }
+]
+
+const DEFAULT_STATUS_OPTIONS = [
+  'New',
+  'In specification',
+  'Specified',
+  'Confirmed',
+  'To be scheduled',
+  'Scheduled',
+  'In progress',
+  'Developed',
+  'In testing',
+  'Tested',
+  'Test failed',
+  'Closed',
+  'On hold',
+  'Rejected'
+].map((name) => ({ value: name, label: name }))
+
+const PAGE_SIZE_STEPS = ['50', '100', '200']
+
+function norm(value: string | undefined): string {
+  return (value ?? '').toLowerCase().trim()
+}
+
 export default function Panel() {
   const locale = read(localeAtom)
   const tr = createTranslator(locale)
@@ -82,11 +113,12 @@ export default function Panel() {
   const priorityFilter = read(priorityFilterAtom)
   const pageSize = read(pageSizeAtom) || '100'
   const searchQuery = read(searchQueryAtom)
+  const filterPanelOpen = read(filterPanelOpenAtom)
+  const tableSort = read(tableSortAtom)
+  const ticketDetailExpanded = read(ticketDetailExpandedAtom)
 
   const projects = snapshot?.projects ?? []
-  const writableProjects = projects.filter(
-    (p) => p.canCreateWorkPackage !== false
-  )
+  const writableProjects = projects.filter((p) => p.canCreateWorkPackage !== false)
   const canCreateAnyTask =
     Boolean(snapshot?.config.hasToken) && writableProjects.length > 0
 
@@ -99,58 +131,38 @@ export default function Panel() {
   const priorities =
     snapshot?.priorities && snapshot.priorities.length > 0
       ? snapshot.priorities
-      : [
-          { id: 1, name: 'Low', color: '#C5F6FA' },
-          { id: 2, name: 'Normal', color: '#74C0FC' },
-          { id: 3, name: 'High', color: '#F59F00' },
-          { id: 4, name: 'Immediate', color: '#FA5252' }
-        ]
+      : DEFAULT_PRIORITIES
   const principals = snapshot?.principals ?? []
   const detectedAgents = snapshot?.detectedAgents ?? []
   const workspaces = snapshot?.workspaces ?? []
   const selectedTicket = snapshot?.selectedTicket ?? null
   const activities = snapshot?.activities ?? []
-  const ticketDetailExpanded = read(ticketDetailExpandedAtom)
-  const focusAnchorId = read(focusAnchorTicketIdAtom)
+  const currentUserName = norm(snapshot?.currentUser)
 
-  const currentUserName = (snapshot?.currentUser || '').toLowerCase().trim()
   const closedStatusMap = new Map<string, boolean>()
   for (const st of statuses) {
-    closedStatusMap.set(
-      st.name.toLowerCase().trim(),
-      st.isClosed ?? isStatusClosedName(st.name)
-    )
+    closedStatusMap.set(norm(st.name), st.isClosed ?? isStatusClosedName(st.name))
   }
-  const isWorkPackageClosed = (statusName: string): boolean => {
-    const key = statusName.toLowerCase().trim()
-    return closedStatusMap.get(key) ?? isStatusClosedName(statusName)
-  }
+  const isClosed = (statusName: string): boolean =>
+    closedStatusMap.get(norm(statusName)) ?? isStatusClosedName(statusName)
 
-  // Compute project-scoped work packages for status counts
-  const projectScopedWorkPackages = allWorkPackages.filter((wp) => {
-    if (projectFilter && projectFilter !== 'all') {
-      return (
-        wp.projectIdentifier === projectFilter ||
-        wp.project === projectFilter ||
-        String(wp.id) === projectFilter
-      )
-    }
-    return true
-  })
+  const inProject = (wp: { projectIdentifier: string; project: string; id: number }) =>
+    !projectFilter ||
+    projectFilter === 'all' ||
+    wp.projectIdentifier === projectFilter ||
+    wp.project === projectFilter ||
+    String(wp.id) === projectFilter
+  const projectScoped = allWorkPackages.filter(inProject)
 
   const statusCounts = new Map<string, number>()
-  for (const wp of projectScopedWorkPackages) {
-    const key = wp.status.toLowerCase().trim()
-    statusCounts.set(key, (statusCounts.get(key) ?? 0) + 1)
+  for (const wp of projectScoped) {
+    statusCounts.set(norm(wp.status), (statusCounts.get(norm(wp.status)) ?? 0) + 1)
   }
 
-  // Build dynamic Status options from OpenProject /api/v3/statuses + discovered statuses
+  // OpenProject /api/v3/statuses plus any status only seen on a loaded work package.
   const discoveredStatuses = [...statuses]
   for (const wp of allWorkPackages) {
-    const exists = discoveredStatuses.some(
-      (s) => s.name.toLowerCase().trim() === wp.status.toLowerCase().trim()
-    )
-    if (!exists && wp.status) {
+    if (wp.status && !discoveredStatuses.some((s) => norm(s.name) === norm(wp.status))) {
       discoveredStatuses.push({
         id: wp.statusId || discoveredStatuses.length + 100,
         name: wp.status,
@@ -158,62 +170,35 @@ export default function Panel() {
       })
     }
   }
-
-  const activeFilterStatuses = discoveredStatuses.filter((s) => {
-    const key = s.name.toLowerCase().trim()
-    const count = statusCounts.get(key) ?? 0
-    if (count === 0 && UNUSED_BOILERPLATE_STATUSES.has(key)) {
-      return false
-    }
-    return true
-  })
-
+  const filterableStatuses = discoveredStatuses.filter(
+    (s) =>
+      (statusCounts.get(norm(s.name)) ?? 0) > 0 ||
+      !UNUSED_BOILERPLATE_STATUSES.has(norm(s.name))
+  )
   const statusFilterOptions = [
-    {
-      value: 'all',
-      label: tr('filters.allStatuses', { count: activeFilterStatuses.length })
-    },
-    ...activeFilterStatuses.map((s) => {
-      const key = s.name.toLowerCase().trim()
-      const count = statusCounts.get(key) ?? 0
-      const isClosedOpt = s.isClosed ?? isStatusClosedName(s.name)
+    { value: 'all', label: tr('filters.allStatuses', { count: filterableStatuses.length }) },
+    ...filterableStatuses.map((s) => {
+      const count = statusCounts.get(norm(s.name)) ?? 0
       return {
         value: s.name,
-        label: isClosedOpt && count === 0 ? s.name : `${s.name} (${count})`
+        label: (s.isClosed ?? isStatusClosedName(s.name)) && count === 0
+          ? s.name
+          : `${s.name} (${count})`
       }
     })
   ]
+  if (!statusFilterOptions.some((o) => o.value === statusFilter)) {
+    statusFilterOptions.push({ value: statusFilter, label: statusFilter })
+  }
 
   const statusTransitionOptions =
     discoveredStatuses.length > 0
-      ? discoveredStatuses.map((s) => ({
-          value: s.name,
-          label: s.name,
-          color: s.color
-        }))
-      : [
-          { value: 'New', label: 'New', color: '#008BD0' },
-          { value: 'In specification', label: 'In specification', color: '#74C0FC' },
-          { value: 'Specified', label: 'Specified', color: '#74C0FC' },
-          { value: 'Confirmed', label: 'Confirmed', color: '#B197FC' },
-          { value: 'To be scheduled', label: 'To be scheduled', color: '#F59F00' },
-          { value: 'Scheduled', label: 'Scheduled', color: '#12B886' },
-          { value: 'In progress', label: 'In progress', color: '#CC5DE8' },
-          { value: 'Developed', label: 'Developed', color: '#8CE99A' },
-          { value: 'In testing', label: 'In testing', color: '#22B8CF' },
-          { value: 'Tested', label: 'Tested', color: '#12B886' },
-          { value: 'Test failed', label: 'Test failed', color: '#FA5252' },
-          { value: 'Closed', label: 'Closed', color: '#DEE2E6' },
-          { value: 'On hold', label: 'On hold', color: '#FD7E14' },
-          { value: 'Rejected', label: 'Rejected', color: '#FA5252' }
-        ]
+      ? discoveredStatuses.map((s) => ({ value: s.name, label: s.name, color: s.color }))
+      : DEFAULT_STATUS_OPTIONS
 
-  // Build Principal / Member options for Assignee & Responsible dropdowns
   const discoveredPrincipals = new Map<string, string>()
   for (const p of principals) {
-    if (p.id && p.name) {
-      discoveredPrincipals.set(String(p.id), p.name)
-    }
+    if (p.id && p.name) discoveredPrincipals.set(String(p.id), p.name)
   }
   for (const wp of allWorkPackages) {
     if (wp.assigneeId && wp.assignee && wp.assignee !== 'Unassigned') {
@@ -231,36 +216,20 @@ export default function Panel() {
   ]
 
   const projectOptions = [
-    {
-      value: 'all',
-      label: tr('filters.allProjects', { count: projects.length })
-    },
-    ...projects.map((p) => ({
-      value: p.identifier,
-      label: p.name
-    }))
+    { value: 'all', label: tr('filters.allProjects', { count: projects.length }) },
+    ...projects.map((p) => ({ value: p.identifier, label: p.name }))
   ]
 
-  const filteredTickets = allWorkPackages.filter((wp) => {
-    if (projectFilter && projectFilter !== 'all') {
-      if (
-        wp.projectIdentifier !== projectFilter &&
-        wp.project !== projectFilter &&
-        String(wp.id) !== projectFilter
-      ) {
-        return false
-      }
-    }
+  const view: WorkPackageView =
+    scopeMode === 'my_todos' ? 'mine' : statusFilter === 'closed' ? 'closed' : 'open'
+
+  const filteredTickets = projectScoped.filter((wp) => {
     if (scopeMode === 'my_todos') {
-      if (isWorkPackageClosed(wp.status)) {
-        return false
-      }
+      if (isClosed(wp.status)) return false
       if (currentUserName) {
-        const assigneeLower = wp.assignee.toLowerCase().trim()
-        const responsibleLower = (wp.responsible || '').toLowerCase().trim()
         if (
-          !assigneeLower.includes(currentUserName) &&
-          !responsibleLower.includes(currentUserName)
+          !norm(wp.assignee).includes(currentUserName) &&
+          !norm(wp.responsible).includes(currentUserName)
         ) {
           return false
         }
@@ -268,149 +237,120 @@ export default function Panel() {
         return false
       }
     }
-    if (statusFilter === 'open' || !statusFilter || statusFilter === 'all') {
-      if (isWorkPackageClosed(wp.status)) {
-        return false
-      }
+    if (!statusFilter || statusFilter === 'all' || statusFilter === 'open') {
+      if (isClosed(wp.status)) return false
     } else if (statusFilter === 'closed') {
-      if (!isWorkPackageClosed(wp.status)) {
-        return false
-      }
-    } else {
-      if (wp.status.toLowerCase().trim() !== statusFilter.toLowerCase().trim()) {
-        return false
-      }
+      if (!isClosed(wp.status)) return false
+    } else if (norm(wp.status) !== norm(statusFilter)) {
+      return false
     }
-    if (priorityFilter && priorityFilter !== 'all') {
-      if (
-        (wp.priority || '').toLowerCase().trim() !==
-        priorityFilter.toLowerCase().trim()
-      ) {
-        return false
-      }
+    if (priorityFilter && priorityFilter !== 'all' && norm(wp.priority) !== norm(priorityFilter)) {
+      return false
     }
-    if (searchQuery.trim().length > 0) {
-      const q = searchQuery.trim().toLowerCase()
-      const hay =
-        `#${wp.id} ${wp.subject} ${wp.project} ${wp.status} ${wp.priority || ''} ${wp.assignee} ${wp.responsible || ''}`.toLowerCase()
-      if (!hay.includes(q)) {
-        return false
-      }
+    const q = searchQuery.trim().toLowerCase()
+    if (q) {
+      const hay = `#${wp.id} ${wp.subject} ${wp.type} ${wp.project} ${wp.status} ${wp.priority || ''} ${wp.assignee} ${wp.responsible || ''}`.toLowerCase()
+      if (!hay.includes(q)) return false
     }
     return true
   })
 
-  const childCountByParentId = new Map<number, number>()
-  for (const wp of allWorkPackages) {
-    if (wp.parentId && wp.parentId > 0) {
-      childCountByParentId.set(
-        wp.parentId,
-        (childCountByParentId.get(wp.parentId) ?? 0) + 1
-      )
-    }
-  }
+  const showingClosed = statusFilter === 'closed' || isClosed(statusFilter)
+  const totalCount = projectScoped.filter((wp) =>
+    showingClosed ? isClosed(wp.status) : !isClosed(wp.status)
+  ).length
 
-  const hasActiveFilters =
+  const drawerFilterCount =
+    (statusFilter !== 'all' && statusFilter !== 'closed' ? 1 : 0) +
+    (priorityFilter !== 'all' ? 1 : 0)
+  const hasAnyFilter =
+    drawerFilterCount > 0 ||
     projectFilter !== 'all' ||
     scopeMode !== 'all' ||
     statusFilter !== 'all' ||
-    priorityFilter !== 'all' ||
-    searchQuery.trim().length > 0
+    searchQuery.trim().length > 0 ||
+    tableSort !== null
 
-  function renderWorkPackageCard(wp: OpenProjectWorkPackage) {
-    const isExpanded = Boolean(
-      selectedTicket?.id === wp.id && ticketDetailExpanded
-    )
-    const stStyle = getStatusToneStyle(wp.status, wp.statusColor)
-    const childCount = Math.max(
-      childCountByParentId.get(wp.id) ?? 0,
-      wp.childIds ? wp.childIds.length : 0
-    )
-    const canWriteTicketProject = writableProjects.some(
-      (p) =>
-        p.identifier === wp.projectIdentifier || p.name === wp.project
-    )
+  const pageLimit = Number(pageSize) || 100
+  const ordered = orderWorkPackages(filteredTickets, tableSort, { statuses, priorities })
+  const visible = ordered.slice(0, pageLimit)
+  const nextPageSize = PAGE_SIZE_STEPS.find((s) => Number(s) > pageLimit)
+  const hasMore =
+    ordered.length > visible.length ||
+    (nextPageSize !== undefined && allWorkPackages.length >= pageLimit)
 
-    return (
-      <Box
-        key={String(wp.id)}
-        border={stStyle.border}
-        background={stStyle.background}
-        radius="md"
-      >
-        <List label={`Work Package #${wp.id}`}>
-          <ListItem
-            key={String(wp.id)}
-            title={`#${wp.id} ${wp.subject}`}
-            description={formatWorkPackageRowMeta(wp, locale, childCount)}
-            onPress={() => selectTicket(wp.id)}
-          />
-        </List>
-        {isExpanded && selectedTicket ? (
-          <Box padding="sm">
-            {TicketDetailView({
-              locale,
-              ticket: selectedTicket,
-              allWorkPackages,
-              canCreateSubtask: canWriteTicketProject,
-              activities,
-              statusTransitionOptions,
-              memberOptions,
-              workspaces,
-              detectedAgents
-            })}
-          </Box>
-        ) : null}
-      </Box>
-    )
+  const detailOpen = Boolean(selectedTicket && ticketDetailExpanded)
+  const rows = buildWorkPackageRows(visible, '—')
+  const columns = buildWorkPackageColumns({
+    id: tr('wp.colId'),
+    type: tr('wp.colType'),
+    subject: tr('wp.colSubject'),
+    status: tr('wp.colStatus'),
+    assignee: tr('wp.colAssignee'),
+    priority: tr('wp.colPriority')
+  })
+
+  const openRow = (key: string | undefined) => {
+    if (!key) {
+      set(ticketDetailExpandedAtom, false)
+      return
+    }
+    const id = Number(key)
+    if (Number.isFinite(id) && id > 0) void selectTicket(id)
   }
 
-  const openProjectScopedWorkPackages = projectScopedWorkPackages.filter(
-    (wp) => !isWorkPackageClosed(wp.status)
-  )
-  const closedProjectScopedWorkPackages = projectScopedWorkPackages.filter(
-    (wp) => isWorkPackageClosed(wp.status)
-  )
-  const isFilteringClosed =
-    statusFilter === 'closed' || isWorkPackageClosed(statusFilter)
-  const effectiveTotalCount = isFilteringClosed
-    ? closedProjectScopedWorkPackages.length
-    : openProjectScopedWorkPackages.length
+  const canWriteSelected = selectedTicket
+    ? writableProjects.some(
+        (p) =>
+          p.identifier === selectedTicket.projectIdentifier ||
+          p.name === selectedTicket.project
+      )
+    : false
 
-  const pageSlice = filteredTickets.slice(0, Number(pageSize) || 100)
-  const displayedTickets = (() => {
-    if (!selectedTicket) {
-      return pageSlice
-    }
-    const inSlice = pageSlice.some((w) => w.id === selectedTicket.id)
-    return inSlice ? pageSlice : [selectedTicket, ...pageSlice]
-  })()
-  const selectedIdx = selectedTicket
-    ? displayedTickets.findIndex((w) => w.id === selectedTicket.id)
-    : -1
-  const isAutoScrollPulse = Boolean(
-    selectedTicket &&
-      ticketDetailExpanded &&
-      focusAnchorId === selectedTicket.id &&
-      selectedIdx !== -1
-  )
-  const ticketsAboveSelected =
-    selectedIdx > 0 ? displayedTickets.slice(0, selectedIdx) : []
-  const selectedTicketInList =
-    selectedIdx !== -1 ? displayedTickets[selectedIdx] : null
-  const ticketsBelowSelected =
-    selectedIdx !== -1
-      ? displayedTickets.slice(selectedIdx + 1)
-      : displayedTickets
+  const listBody =
+    snapshot === null ? (
+      <Spinner label={tr('tickets.loading')} />
+    ) : !snapshot.config.hasToken && allWorkPackages.length === 0 ? (
+      <Card title={tr('tickets.onboardingTitle')} description={tr('tickets.onboardingDesc')}>
+        <Row gap="xs" align="center" wrap>
+          <Button size="xs" tone="accent" onPress={() => set(activeTabAtom, 'setup')}>
+            {tr('tickets.configureButton')}
+          </Button>
+        </Row>
+      </Card>
+    ) : filteredTickets.length === 0 ? (
+      <EmptyState
+        icon="search"
+        title={tr('tickets.emptyTitle')}
+        description={tr('tickets.emptyDesc')}
+      />
+    ) : (
+      <Table
+        label={tr('wp.tableLabel')}
+        columns={columns}
+        rows={rows}
+        sort={tableSort ?? undefined}
+        selectionMode="single"
+        selected={detailOpen && selectedTicket ? [String(selectedTicket.id)] : []}
+        maxHeight={detailOpen ? 'sm' : 'lg'}
+        hasMore={hasMore}
+        onSortChange={(next) => set(tableSortAtom, next)}
+        onSelectionChange={({ keys }) => openRow(keys[0])}
+        onRowAction={({ key }) => openRow(key)}
+        onLoadMore={() => {
+          if (nextPageSize) void changePageSize(nextPageSize)
+        }}
+      />
+    )
 
   return (
     <Stack gap="sm">
-      {HeaderBar({
+      {WorkPackageHeader({
         locale,
         snapshot,
-        filteredCount: filteredTickets.length,
-        totalCount: effectiveTotalCount,
-        projectCount: projects.length
+        shownCount: filteredTickets.length,
+        totalCount,
+        canCreate: canCreateAnyTask
       })}
 
       {feedback ? (
@@ -432,80 +372,43 @@ export default function Panel() {
       >
         <Tab value="tickets" label={tr('tabs.tickets')}>
           <Stack gap="sm">
-            {TicketFilters({
+            {WorkPackageToolbar({
               locale,
-              scopeMode,
+              view,
               projectFilter,
               statusFilter,
               priorityFilter,
               pageSize,
               searchQuery,
+              filterPanelOpen,
+              activeFilterCount: drawerFilterCount,
+              canReset: hasAnyFilter,
               priorities,
               projectOptions,
-              statusFilterOptions,
-              hasActiveFilters
+              statusFilterOptions
             })}
 
-            {snapshot === null ? (
-              <Spinner label={tr('tickets.loading')} />
-            ) : !snapshot.config.hasToken && allWorkPackages.length === 0 ? (
-              <Card
-                title={tr('tickets.onboardingTitle')}
-                description={tr('tickets.onboardingDesc')}
-              >
-                <Row gap="xs" align="center" wrap>
-                  <Button
-                    size="xs"
-                    tone="accent"
-                    onPress={() => set(activeTabAtom, 'setup')}
-                  >
-                    {tr('tickets.configureButton')}
-                  </Button>
-                </Row>
-              </Card>
-            ) : filteredTickets.length === 0 ? (
-              <EmptyState
-                title={tr('tickets.emptyTitle')}
-                description={tr('tickets.emptyDesc')}
-              />
-            ) : (
-              <Stack gap="xs">
-                <Box key="above-selected">
-                  {!isAutoScrollPulse && ticketsAboveSelected.length > 0 ? (
-                    <Stack gap="xs">
-                      {ticketsAboveSelected.map((wp) =>
-                        renderWorkPackageCard(wp)
-                      )}
-                    </Stack>
-                  ) : null}
-                </Box>
-                {selectedTicketInList ? (
-                  <Box key="selected-anchor">
-                    {renderWorkPackageCard(selectedTicketInList)}
-                  </Box>
-                ) : null}
-                <Box key="below-selected">
-                  {!isAutoScrollPulse ? (
-                    <Stack gap="xs">
-                      {ticketsBelowSelected.map((wp) =>
-                        renderWorkPackageCard(wp)
-                      )}
-                      <Box height={180} />
-                    </Stack>
-                  ) : (
-                    <Box height={900} />
-                  )}
-                </Box>
-              </Stack>
-            )}
+            {listBody}
+
+            {detailOpen && selectedTicket
+              ? TicketDetailView({
+                  locale,
+                  ticket: selectedTicket,
+                  baseUrl: snapshot?.config.baseUrl ?? '',
+                  allWorkPackages,
+                  canCreateSubtask: canWriteSelected,
+                  activities,
+                  principals,
+                  statusTransitionOptions,
+                  memberOptions,
+                  workspaces,
+                  detectedAgents
+                })
+              : null}
           </Stack>
         </Tab>
 
-        <Tab
-          value="create"
-          label={tr('tabs.newTask')}
-          disabled={!canCreateAnyTask}
-        >
+        <Tab value="create" label={tr('tabs.newTask')} disabled={!canCreateAnyTask}>
           {CreateTicketView({
             locale,
             writableProjects,
@@ -517,11 +420,7 @@ export default function Panel() {
         </Tab>
 
         <Tab value="setup" label={tr('tabs.setup')}>
-          {SetupView({
-            locale,
-            snapshot,
-            detectedAgents
-          })}
+          {SetupView({ locale, snapshot, detectedAgents })}
         </Tab>
       </Tabs>
     </Stack>

@@ -44,8 +44,12 @@ export const searchQueryAtom = atom<string>('openproject.searchQuery', '', {
   persist: 'plugin'
 })
 export const ticketDetailExpandedAtom = atom<boolean>(true)
-export const descriptionOpenAtom = atom<boolean>(true)
-export const focusAnchorTicketIdAtom = atom<number | null>(null)
+export const filterPanelOpenAtom = atom<boolean>(false)
+export const detailTabAtom = atom<string>('overview')
+export const tableSortAtom = atom<{
+  column: string
+  direction: 'asc' | 'desc'
+} | null>('openproject.tableSort', null, { persist: 'plugin' })
 export const targetWorkspaceIdAtom = atom<string>('')
 export const launchPanelOpenAtom = atom<boolean>(false)
 export const launchCreateWorktreeAtom = atom<boolean>(false)
@@ -69,7 +73,6 @@ export const newTicketPriorityAtom = atom<string>('Normal')
 export const newTicketAssigneeAtom = atom<string>('0')
 export const newTicketResponsibleAtom = atom<string>('0')
 export const newTicketDescAtom = atom<string>('')
-export const collapsedParentIdsAtom = atom<number[]>([])
 
 export const configUrlDraftAtom = atom<string>('')
 export const configTokenDraftAtom = atom<string>('')
@@ -186,7 +189,6 @@ export async function refreshAll(): Promise<void> {
 
 export async function changeProjectFilter(nextProject: string): Promise<void> {
   set(projectFilterAtom, nextProject)
-  set(focusAnchorTicketIdAtom, null)
   const currentLimit = Number(read(pageSizeAtom) || '100')
   const currentStatus = read(statusFilterAtom)
   const wantClosed = isStatusClosedName(currentStatus)
@@ -211,7 +213,6 @@ export async function changeProjectFilter(nextProject: string): Promise<void> {
 
 export async function changeStatusFilter(nextStatus: string): Promise<void> {
   set(statusFilterAtom, nextStatus)
-  set(focusAnchorTicketIdAtom, null)
   if (!isStatusClosedName(nextStatus)) {
     return
   }
@@ -258,35 +259,18 @@ export async function changePageSize(nextSizeStr: string): Promise<void> {
   }
 }
 
-export async function selectTicket(
-  id: number,
-  fromAnchorId?: number
-): Promise<void> {
+/** Opens `id` in the detail view; already selected, it just re-opens the details. */
+export async function selectTicket(id: number): Promise<void> {
   try {
     const currentSnapshot = read(stateAtom)
-    if (
-      fromAnchorId === undefined &&
-      currentSnapshot?.selectedTicket?.id === id
-    ) {
-      const nextExpanded = !read(ticketDetailExpandedAtom)
-      set(ticketDetailExpandedAtom, nextExpanded)
+    if (currentSnapshot?.selectedTicket?.id === id) {
+      set(ticketDetailExpandedAtom, true)
       return
-    }
-
-    if (fromAnchorId !== undefined) {
-      set(focusAnchorTicketIdAtom, id)
-      const timer = setTimeout(() => {
-        if (read(focusAnchorTicketIdAtom) === id) {
-          set(focusAnchorTicketIdAtom, null)
-        }
-      }, 65)
-      ;(timer as unknown as { unref?: () => void })?.unref?.()
-    } else {
-      set(focusAnchorTicketIdAtom, null)
     }
 
     set(ticketDetailExpandedAtom, true)
     set(launchPanelOpenAtom, false)
+    set(detailTabAtom, 'overview')
 
     const cachedWp = currentSnapshot?.workPackages.find((wp) => wp.id === id)
     if (currentSnapshot && cachedWp) {
@@ -389,14 +373,29 @@ export function buildUpdatePayload(
   return payload
 }
 
-export async function confirmTicketUpdate(ticketId: number): Promise<void> {
+/** Saves status / assignee / accountable drafts without posting the comment draft. */
+export async function saveTicketChanges(ticketId: number): Promise<void> {
+  const payload = buildUpdatePayload(ticketId, true)
+  delete payload.comment
+  await runTicketUpdate(ticketId, payload, false)
+}
+
+/** Posts only the comment draft, leaving attribute drafts untouched. */
+export async function postTicketComment(ticketId: number): Promise<void> {
+  const comment = read(commentDraftAtom).trim()
+  if (!comment) return
+  await runTicketUpdate(ticketId, { id: ticketId, comment, confirm: true }, true)
+}
+
+async function runTicketUpdate(
+  ticketId: number,
+  payload: ReturnType<typeof buildUpdatePayload>,
+  clearComment: boolean
+): Promise<void> {
   const locale = read(localeAtom)
   try {
-    const res = await plugin.request(
-      'openproject.workPackages.update',
-      buildUpdatePayload(ticketId, true)
-    )
-    set(commentDraftAtom, '')
+    const res = await plugin.request('openproject.workPackages.update', payload)
+    if (clearComment) set(commentDraftAtom, '')
     set(feedbackMessageAtom, {
       tone: 'success',
       text:
@@ -404,6 +403,8 @@ export async function confirmTicketUpdate(ticketId: number): Promise<void> {
           ? t(locale, 'feedback.updatedTicket', { id: ticketId })
           : res.summary
     })
+    const snapshot = await plugin.request('openproject.state.get')
+    syncDraftsFromSnapshot(snapshot)
   } catch (err) {
     set(feedbackMessageAtom, {
       tone: 'danger',
@@ -412,17 +413,7 @@ export async function confirmTicketUpdate(ticketId: number): Promise<void> {
   }
 }
 
-export function toggleParentChildrenCollapsed(parentId: number): void {
-  const current = read(collapsedParentIdsAtom)
-  if (current.includes(parentId)) {
-    set(
-      collapsedParentIdsAtom,
-      current.filter((id) => id !== parentId)
-    )
-  } else {
-    set(collapsedParentIdsAtom, [...current, parentId])
-  }
-}
+
 
 export function startCreatingSubtask(
   parentProjectIdentifier: string,
@@ -584,7 +575,7 @@ export function resetAllFilters(): void {
   set(statusFilterAtom, 'all')
   set(priorityFilterAtom, 'all')
   set(searchQueryAtom, '')
-  set(focusAnchorTicketIdAtom, null)
+  set(tableSortAtom, null)
   if (prevProject && prevProject !== 'all') {
     void changeProjectFilter('all')
   }

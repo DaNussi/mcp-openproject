@@ -1,10 +1,10 @@
 import {
   Box,
   Button,
-  Card,
-  Collapsible,
+  Heading,
   IconButton,
-  Input,
+  KeyValue,
+  Link,
   List,
   ListItem,
   Markdown,
@@ -13,81 +13,116 @@ import {
   Select,
   Separator,
   set,
+  shell,
   Stack,
-  Text
+  Tab,
+  Tabs,
+  Text,
+  Textarea
 } from 'orca'
 import { createTranslator, type UiLocale } from '../i18n'
-import {
-  formatWorktreeBranchSlug,
-  matchBestWorkspaceForTicket
-} from '../openproject-api'
 import type {
   DetectedAgentCli,
   OpenProjectActivity,
+  OpenProjectPrincipalItem,
   OpenProjectWorkPackage,
   OpenProjectWorkspaceOption
 } from '../protocol'
 import {
   commentDraftAtom,
-  configAgentDraftAtom,
-  confirmTicketUpdate,
-  descriptionOpenAtom,
-  launchAgentForSelectedTicket,
-  launchBranchDraftAtom,
-  launchCreateWorktreeAtom,
+  detailTabAtom,
   launchPanelOpenAtom,
   nextAssigneeDraftAtom,
   nextResponsibleDraftAtom,
   nextStatusDraftAtom,
+  postTicketComment,
+  saveTicketChanges,
   selectTicket,
   startCreatingSubtask,
-  targetWorkspaceIdAtom,
   ticketDetailExpandedAtom
 } from '../state/panel-state'
 import {
   formatShortDate,
-  formatWorkPackageRowMeta,
   getPriorityToneStyle,
   getStatusToneStyle,
-  getTypeToneStyle
+  getTypeToneStyle,
+  resolvePrincipalIdString
 } from '../utils/openproject-tones'
+import { workPackageUrl } from '../utils/work-package-table'
+import { LaunchAgentDrawer } from './LaunchAgentDrawer'
 
 export interface TicketDetailViewProps {
   locale: UiLocale
   ticket: OpenProjectWorkPackage
+  baseUrl: string
   allWorkPackages: OpenProjectWorkPackage[]
   canCreateSubtask?: boolean
   activities: OpenProjectActivity[]
+  principals: OpenProjectPrincipalItem[]
   statusTransitionOptions: Array<{ value: string; label: string; color?: string }>
   memberOptions: Array<{ value: string; label: string }>
   workspaces?: OpenProjectWorkspaceOption[]
   detectedAgents?: DetectedAgentCli[]
 }
 
+function SectionTitle(label: string) {
+  return (
+    <Stack gap="xs">
+      <Text size="xs" weight="semibold" muted>
+        {label.toUpperCase()}
+      </Text>
+      <Separator />
+    </Stack>
+  )
+}
+
+function sameName(a: string, b: string): boolean {
+  return a.toLowerCase().trim() === b.toLowerCase().trim()
+}
+
+/** OpenProject's split-screen work package view: header, status, Overview / Activity / Relations. */
 export function TicketDetailView({
   locale,
   ticket,
+  baseUrl,
   allWorkPackages,
   canCreateSubtask,
   activities,
+  principals,
   statusTransitionOptions,
   memberOptions,
   workspaces = [],
   detectedAgents = []
 }: TicketDetailViewProps) {
   const tr = createTranslator(locale)
+  const detailTab = read(detailTabAtom)
+  const launchPanelOpen = read(launchPanelOpenAtom)
+  const statusDraft = read(nextStatusDraftAtom) || ticket.status
   const assigneeDraft = read(nextAssigneeDraftAtom) || '0'
   const responsibleDraft = read(nextResponsibleDraftAtom) || '0'
+  const commentDraft = read(commentDraftAtom)
+
+  const currentAssignee = resolvePrincipalIdString(
+    ticket.assigneeId,
+    ticket.assignee,
+    principals
+  )
+  const currentResponsible = resolvePrincipalIdString(
+    ticket.responsibleId,
+    ticket.responsible,
+    principals
+  )
+  const isDirty =
+    !sameName(statusDraft, ticket.status) ||
+    assigneeDraft !== currentAssignee ||
+    responsibleDraft !== currentResponsible
 
   const ticketMemberOptions = [...memberOptions]
   if (
     ticket.assigneeId &&
     !ticketMemberOptions.some((o) => o.value === String(ticket.assigneeId))
   ) {
-    ticketMemberOptions.push({
-      value: String(ticket.assigneeId),
-      label: ticket.assignee
-    })
+    ticketMemberOptions.push({ value: String(ticket.assigneeId), label: ticket.assignee })
   }
   if (
     ticket.responsibleId &&
@@ -99,494 +134,311 @@ export function TicketDetailView({
     })
   }
 
-  const branchSlug = formatWorktreeBranchSlug(ticket.id, ticket.subject)
-  const typeStyle = getTypeToneStyle(ticket.type, ticket.typeColor)
-  const prioStyle = getPriorityToneStyle(ticket.priority, ticket.priorityColor)
-
-  const bestMatchedWs = matchBestWorkspaceForTicket(ticket, workspaces)
-  const selectedWsId =
-    read(targetWorkspaceIdAtom) || bestMatchedWs?.id || workspaces[0]?.id || ''
-  const selectedWsObj =
-    workspaces.find((w) => w.id === selectedWsId) ?? bestMatchedWs
-  const selectedWsLabel =
-    selectedWsObj?.repoName &&
-    selectedWsObj?.name &&
-    selectedWsObj.name !== selectedWsObj.repoName
-      ? `${selectedWsObj.repoName}/${selectedWsObj.name}`
-      : selectedWsObj?.repoName || selectedWsObj?.name || 'default'
-
-  const launchPanelOpen = read(launchPanelOpenAtom)
-  const createWorktree = read(launchCreateWorktreeAtom)
-  const branchDraft = read(launchBranchDraftAtom) || branchSlug
-  const selectedAgent = read(configAgentDraftAtom) || 'codex'
-
-  const getRepoKey = (ws: OpenProjectWorkspaceOption): string =>
-    (ws.repoName || ws.repoId || ws.name).toLowerCase()
-
-  const projTokens = `${ticket.projectIdentifier} ${ticket.project}`
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length >= 3 && t !== 'project')
-
-  const repoGroups = (() => {
-    const map = new Map<
-      string,
-      {
-        key: string
-        label: string
-        representative: OpenProjectWorkspaceOption
-        worktrees: OpenProjectWorkspaceOption[]
-        hasFocused: boolean
-        matchesProject: boolean
-      }
-    >()
-    for (const ws of workspaces) {
-      const key = getRepoKey(ws)
-      const label = ws.repoName || ws.name
-      const existing = map.get(key)
-      const matchesProject = projTokens.some((tok) => key.includes(tok))
-      if (!existing) {
-        map.set(key, {
-          key,
-          label,
-          representative: ws,
-          worktrees: [ws],
-          hasFocused: Boolean(ws.isFocused),
-          matchesProject
-        })
-      } else {
-        existing.worktrees.push(ws)
-        if (ws.isFocused) existing.hasFocused = true
-        if (ws.isMainWorktree && !existing.representative.isMainWorktree) {
-          existing.representative = ws
-        }
-      }
-    }
-    return Array.from(map.values()).sort((a, b) => {
-      if (a.matchesProject && !b.matchesProject) return -1
-      if (!a.matchesProject && b.matchesProject) return 1
-      if (a.hasFocused && !b.hasFocused) return -1
-      if (!a.hasFocused && b.hasFocused) return 1
-      return a.label.localeCompare(b.label)
-    })
-  })()
-
-  const activeRepoGroup =
-    (selectedWsObj
-      ? repoGroups.find((g) => g.key === getRepoKey(selectedWsObj))
-      : undefined) ?? repoGroups[0]
-
-  const repoSelectOptions =
-    repoGroups.length > 0
-      ? repoGroups.map((g) => ({
-          value: g.representative.id,
-          label: `${g.label}${g.hasFocused ? ' ★' : ''}`
-        }))
-      : [{ value: selectedWsId || 'default-workspace', label: selectedWsLabel }]
-
-  const selectedRepoRepId =
-    activeRepoGroup?.representative.id ||
-    repoSelectOptions[0]?.value ||
-    selectedWsId
-
-  const worktreeOptionsForRepo =
-    activeRepoGroup && activeRepoGroup.worktrees.length > 0
-      ? activeRepoGroup.worktrees.map((ws) => {
-          const wtName = ws.name || ws.branch || ws.repoName || ws.id
-          const branchInfo =
-            ws.branch && ws.branch !== wtName ? ` (${ws.branch})` : ''
-          const mainTag = ws.isMainWorktree ? ' [main]' : ''
-          const activeTag = ws.isFocused ? ' ★' : ''
-          return {
-            value: ws.id,
-            label: `${wtName}${branchInfo}${mainTag}${activeTag}`
-          }
-        })
-      : [{ value: selectedWsId || 'default-workspace', label: selectedWsLabel }]
-
-  const effectiveSelectedWsId = worktreeOptionsForRepo.some(
-    (o) => o.value === selectedWsId
+  const statusOptions = statusTransitionOptions.some((o) =>
+    sameName(o.value, statusDraft)
   )
-    ? selectedWsId
-    : (activeRepoGroup
-        ? matchBestWorkspaceForTicket(ticket, activeRepoGroup.worktrees)?.id
-        : undefined) ||
-      worktreeOptionsForRepo[0]?.value ||
-      selectedWsId
+    ? statusTransitionOptions
+    : [{ value: statusDraft, label: statusDraft }, ...statusTransitionOptions]
+  const statusSelectValue =
+    statusOptions.find((o) => sameName(o.value, statusDraft))?.value ?? statusDraft
 
-  const installedAgents = detectedAgents.filter((a) => a.installed)
-  const agentSource =
-    installedAgents.length > 0 ? installedAgents : detectedAgents
-  const agentOptions =
-    agentSource.length > 0
-      ? agentSource.map((a) => ({
-          value: a.id,
-          label: a.installed
-            ? a.label
-            : `${a.label}${tr('agent.notDetectedSuffix')}`
-        }))
-      : [
-          { value: 'antigravity', label: 'Antigravity (agy)' },
-          { value: 'codex', label: 'OpenAI Codex (codex)' },
-          { value: 'claude', label: 'Claude Code (claude)' },
-          { value: 'gemini', label: 'Gemini CLI (gemini)' },
-          { value: 'cursor-agent', label: 'Cursor Agent (cursor-agent)' },
-          { value: 'opencode', label: 'OpenCode (opencode)' }
-        ]
+  const typeStyle = getTypeToneStyle(ticket.type, ticket.typeColor)
+  const statusStyle = getStatusToneStyle(ticket.status, ticket.statusColor)
+  const prioStyle = getPriorityToneStyle(ticket.priority, ticket.priorityColor)
+  const externalUrl = workPackageUrl(baseUrl, ticket.id)
 
   const parentWp = ticket.parentId
     ? allWorkPackages.find((w) => w.id === ticket.parentId)
     : undefined
-  const fullParentSubject =
-    ticket.parentSubject || parentWp?.subject || ''
-  const subtasks = allWorkPackages
+  const parentSubject = ticket.parentSubject || parentWp?.subject || ''
+  const children = allWorkPackages
     .filter((w) => w.parentId === ticket.id)
     .sort((a, b) => a.id - b.id)
+  const relationCount = children.length + (ticket.parentId ? 1 : 0)
+  const sortedActivities = [...activities].sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt)
+  )
 
   return (
-    <Stack gap="md">
-      <Separator />
-      {/* Row 1: Launch Agent + Bordered Type Box + Bordered Priority Box + Pinned Collapse IconButton */}
-      <Row justify="between" align="center" gap="xs">
-        <Row gap="xs" align="center" wrap>
+    <Box border="neutral" background="card" radius="md" padding="sm">
+      <Stack gap="sm">
+        <Row justify="between" align="center" gap="xs">
+          <Row gap="xs" align="center">
+            <Text size="xs" weight="semibold" tone={typeStyle.textTone}>
+              {(ticket.type || 'Task').toUpperCase()}
+            </Text>
+            <Text size="xs" muted>
+              #{ticket.id}
+            </Text>
+          </Row>
+          <Row gap="xs" align="center">
+            {externalUrl ? (
+              <IconButton
+                size="xs"
+                variant="ghost"
+                icon="open-external"
+                label={tr('detail.openInOpenProject')}
+                tooltip={tr('detail.openInOpenProject')}
+                onPress={() => {
+                  void shell.openExternal(externalUrl)
+                }}
+              />
+            ) : null}
+            <IconButton
+              size="xs"
+              variant="ghost"
+              icon="close"
+              label={tr('ticket.close')}
+              tooltip={tr('ticket.close')}
+              onPress={() => set(ticketDetailExpandedAtom, false)}
+            />
+          </Row>
+        </Row>
+
+        {ticket.parentId ? (
+          <Text size="xs" muted>
+            {'↑ '}
+            <Link onPress={() => selectTicket(ticket.parentId!)}>
+              {parentSubject
+                ? `#${ticket.parentId} ${parentSubject}`
+                : `#${ticket.parentId}`}
+            </Link>
+          </Text>
+        ) : null}
+
+        <Heading level={2}>{ticket.subject}</Heading>
+
+        <Row gap="xs" align="end" wrap>
+          <Box minWidth={150}>
+            <Select
+              label={tr('detail.statusLabel')}
+              labelHidden
+              value={statusSelectValue}
+              options={statusOptions.map((o) => ({ value: o.value, label: o.label }))}
+              onChange={(val) => set(nextStatusDraftAtom, val)}
+            />
+          </Box>
           <Button
-            size="xs"
+            size="sm"
+            icon="agent"
             tone="accent"
             variant={launchPanelOpen ? 'solid' : 'outline'}
             onPress={() => set(launchPanelOpenAtom, !launchPanelOpen)}
           >
             {tr('ticket.launchAgent')}
           </Button>
-          <Box
-            border={typeStyle.border}
-            background={typeStyle.background}
-            radius="sm"
-            padding="xs"
-          >
-            <Text size="xs" tone={typeStyle.textTone}>
-              {ticket.type}
-            </Text>
-          </Box>
-          <Box
-            border={prioStyle.border}
-            background={prioStyle.background}
-            radius="sm"
-            padding="xs"
-          >
-            <Text size="xs" tone={prioStyle.textTone}>
-              {tr('ticket.priorityBadge', { priority: ticket.priority })}
-            </Text>
-          </Box>
         </Row>
-        <IconButton
-          size="xs"
-          variant="outline"
-          icon="collapse"
-          label={tr('ticket.close')}
-          onPress={() => set(ticketDetailExpandedAtom, false)}
-        />
-      </Row>
 
-      {/* Inline Launch Agent Configuration Drawer (Orca Native Worktree/Agent Flow) */}
-      {launchPanelOpen ? (
-        <Box
-          border="accent"
-          background="surface"
-          radius="sm"
-          padding="sm"
+        {ticket.updatedAt ? (
+          <Text size="xs" muted>
+            {tr('detail.updatedOn', { date: formatShortDate(ticket.updatedAt) })}
+          </Text>
+        ) : null}
+
+        {launchPanelOpen
+          ? LaunchAgentDrawer({ locale, ticket, workspaces, detectedAgents })
+          : null}
+
+        <Tabs
+          label={tr('detail.tabsLabel')}
+          value={detailTab}
+          onChange={(next) => set(detailTabAtom, next)}
         >
-          <Stack gap="xs">
-            <Row gap="xs" align="center" wrap>
-              <Button
-                size="xs"
-                tone={!createWorktree ? 'accent' : undefined}
-                variant={!createWorktree ? 'solid' : 'outline'}
-                onPress={() => set(launchCreateWorktreeAtom, false)}
-              >
-                {tr('ticket.launchModeExisting')}
-              </Button>
-              <Button
-                size="xs"
-                tone={createWorktree ? 'accent' : undefined}
-                variant={createWorktree ? 'solid' : 'outline'}
-                onPress={() => set(launchCreateWorktreeAtom, true)}
-              >
-                {tr('ticket.launchModeWorktree')}
-              </Button>
-            </Row>
-            <Select
-              label={tr('ticket.targetRepoLabel')}
-              value={selectedRepoRepId}
-              options={repoSelectOptions}
-              onChange={(repId) => {
-                const nextGroup = repoGroups.find(
-                  (g) => g.representative.id === repId
-                )
-                if (nextGroup) {
-                  const bestInRepo =
-                    matchBestWorkspaceForTicket(ticket, nextGroup.worktrees) ??
-                    nextGroup.representative
-                  set(targetWorkspaceIdAtom, bestInRepo.id)
-                } else {
-                  set(targetWorkspaceIdAtom, repId)
-                }
-              }}
-            />
-            {createWorktree ? (
-              <Input
-                label={tr('ticket.worktreeBranchLabel')}
-                value={branchDraft}
-                onChange={(val) => set(launchBranchDraftAtom, val)}
-              />
-            ) : (
-              <Select
-                label={tr('ticket.targetWorkspaceLabel')}
-                value={effectiveSelectedWsId}
-                options={worktreeOptionsForRepo}
-                onChange={(v) => set(targetWorkspaceIdAtom, v)}
-              />
-            )}
-            <Select
-              label={tr('ticket.launchAgentSelectLabel')}
-              value={selectedAgent}
-              options={agentOptions}
-              onChange={(v) => set(configAgentDraftAtom, v)}
-            />
-            <Row gap="xs" align="center">
-              <Button
-                size="xs"
-                tone="accent"
-                onPress={() => {
-                  if (effectiveSelectedWsId !== selectedWsId) {
-                    set(targetWorkspaceIdAtom, effectiveSelectedWsId)
-                  }
-                  void launchAgentForSelectedTicket(ticket.id)
-                }}
-              >
-                {createWorktree
-                  ? tr('ticket.createAndStartButton')
-                  : tr('ticket.startAgentButton')}
-              </Button>
-              <Button
-                size="xs"
-                variant="outline"
-                onPress={() => set(launchPanelOpenAtom, false)}
-              >
-                {tr('ticket.cancelLaunchButton')}
-              </Button>
-            </Row>
-          </Stack>
-        </Box>
-      ) : null}
+          <Tab value="overview" label={tr('detail.tabOverview')}>
+            <Stack gap="md">
+              <Stack gap="xs">
+                {SectionTitle(tr('ticket.description'))}
+                {ticket.description ? (
+                  <Box maxHeight={240} scroll="y" padding="xs">
+                    <Markdown content={ticket.description} />
+                  </Box>
+                ) : (
+                  <Text size="xs" muted>
+                    {tr('detail.noDescription')}
+                  </Text>
+                )}
+              </Stack>
 
-      {/* Row 2: Parent Jump + Add Subtask + Bordered Updated Date */}
-      {ticket.parentId || canCreateSubtask || ticket.updatedAt ? (
-        <Row justify="between" align="center" gap="xs" wrap>
-          <Row gap="xs" align="center" wrap>
-            {ticket.parentId ? (
-              <Button
-                size="xs"
-                variant="outline"
-                tooltip={
-                  fullParentSubject
-                    ? `#${ticket.parentId} ${fullParentSubject}`
-                    : undefined
-                }
-                onPress={() => selectTicket(ticket.parentId!, ticket.id)}
-              >
-                {tr('ticket.parentButton', {
-                  id: ticket.parentId
-                })}
-              </Button>
-            ) : null}
-            {canCreateSubtask ? (
-              <Button
-                size="xs"
-                variant="outline"
-                onPress={() =>
-                  startCreatingSubtask(ticket.projectIdentifier, ticket.id)
-                }
-              >
-                {tr('ticket.addSubtask')}
-              </Button>
-            ) : null}
-          </Row>
-          {ticket.updatedAt ? (
-            <Box
-              border="neutral"
-              background="card"
-              radius="sm"
-              padding="xs"
-            >
-              <Text size="xs" muted>
-                {formatShortDate(ticket.updatedAt)}
-              </Text>
-            </Box>
-          ) : null}
-        </Row>
-      ) : null}
+              <Stack gap="xs">
+                {SectionTitle(tr('detail.sectionPeople'))}
+                <Box columns={2} gap="xs">
+                  <Select
+                    label={tr('ticket.assignee')}
+                    value={assigneeDraft}
+                    options={ticketMemberOptions}
+                    onChange={(val) => set(nextAssigneeDraftAtom, val)}
+                  />
+                  <Select
+                    label={tr('ticket.responsible')}
+                    value={responsibleDraft}
+                    options={ticketMemberOptions}
+                    onChange={(val) => set(nextResponsibleDraftAtom, val)}
+                  />
+                </Box>
+              </Stack>
 
-      {subtasks.length > 0 ? (
-        <Collapsible
-          title={tr('ticket.subtasksTitle', { count: subtasks.length })}
-          defaultOpen={true}
-        >
-          <Box
-            width="100%"
-            maxHeight={420}
-            scroll="y"
-            border="neutral"
-            background="card"
-            radius="sm"
-            padding="xs"
-          >
-            <Stack gap="xs">
-              {subtasks.map((child) => {
-                const childStyle = getStatusToneStyle(
-                  child.status,
-                  child.statusColor
-                )
-                return (
-                  <Box
-                    key={String(child.id)}
-                    border={childStyle.border}
-                    background={childStyle.background}
-                    radius="sm"
+              <Stack gap="xs">
+                {SectionTitle(tr('detail.sectionDetails'))}
+                <KeyValue
+                  label={tr('detail.sectionDetails')}
+                  items={[
+                    { label: tr('detail.type'), value: ticket.type, tone: typeStyle.textTone },
+                    { label: tr('detail.status'), value: ticket.status, tone: statusStyle.textTone },
+                    { label: tr('detail.priority'), value: ticket.priority, tone: prioStyle.textTone },
+                    { label: tr('detail.project'), value: ticket.project },
+                    {
+                      label: tr('detail.updated'),
+                      value: ticket.updatedAt ? formatShortDate(ticket.updatedAt) : '—'
+                    }
+                  ]}
+                />
+              </Stack>
+
+              <Row gap="xs" align="center">
+                <Button
+                  size="xs"
+                  tone="accent"
+                  icon="check"
+                  disabled={!isDirty}
+                  onPress={() => saveTicketChanges(ticket.id)}
+                >
+                  {tr('detail.save')}
+                </Button>
+                {isDirty ? (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onPress={() => {
+                      set(nextStatusDraftAtom, ticket.status)
+                      set(nextAssigneeDraftAtom, currentAssignee)
+                      set(nextResponsibleDraftAtom, currentResponsible)
+                    }}
                   >
-                    <List label={`Subtask #${child.id}`}>
+                    {tr('detail.discard')}
+                  </Button>
+                ) : null}
+              </Row>
+            </Stack>
+          </Tab>
+
+          <Tab
+            value="activity"
+            label={tr('detail.tabActivity', { count: activities.length })}
+          >
+            <Stack gap="sm">
+              <Textarea
+                label={tr('ticket.comment')}
+                labelHidden
+                placeholder={tr('detail.commentPlaceholder')}
+                rows={3}
+                value={commentDraft}
+                onChange={(val) => set(commentDraftAtom, val)}
+              />
+              <Row gap="xs">
+                <Button
+                  size="xs"
+                  tone="accent"
+                  disabled={!commentDraft.trim()}
+                  onPress={() => postTicketComment(ticket.id)}
+                >
+                  {tr('detail.postComment')}
+                </Button>
+              </Row>
+              {sortedActivities.length === 0 ? (
+                <Text size="xs" muted>
+                  {tr('detail.noActivity')}
+                </Text>
+              ) : (
+                <Stack gap="xs">
+                  {sortedActivities.map((act) => (
+                    <Box
+                      key={String(act.id)}
+                      border="neutral"
+                      radius="sm"
+                      padding="xs"
+                    >
+                      <Stack gap="xs">
+                        <Row justify="between" align="center" gap="xs">
+                          <Text size="xs" weight="semibold">
+                            {act.user}
+                          </Text>
+                          <Text size="xs" muted>
+                            {formatShortDate(act.createdAt)}
+                          </Text>
+                        </Row>
+                        <Markdown content={act.comment} />
+                      </Stack>
+                    </Box>
+                  ))}
+                </Stack>
+              )}
+            </Stack>
+          </Tab>
+
+          <Tab
+            value="relations"
+            label={tr('detail.tabRelations', { count: relationCount })}
+          >
+            <Stack gap="sm">
+              {ticket.parentId ? (
+                <Stack gap="xs">
+                  {SectionTitle(tr('detail.parent'))}
+                  <List label={tr('detail.parent')}>
+                    <ListItem
+                      key={`parent-${ticket.parentId}`}
+                      icon="layers"
+                      title={`#${ticket.parentId} ${parentSubject}`.trim()}
+                      description={
+                        parentWp ? `${parentWp.type} · ${parentWp.status}` : undefined
+                      }
+                      onPress={() => selectTicket(ticket.parentId!)}
+                    />
+                  </List>
+                </Stack>
+              ) : null}
+              <Stack gap="xs">
+                {SectionTitle(tr('detail.children', { count: children.length }))}
+                {children.length > 0 ? (
+                  <List label={tr('detail.children', { count: children.length })}>
+                    {children.map((child) => (
                       <ListItem
                         key={String(child.id)}
                         title={`↳ #${child.id} ${child.subject}`}
-                        description={formatWorkPackageRowMeta(child, locale)}
-                        onPress={() => selectTicket(child.id, ticket.id)}
+                        description={[
+                          child.type,
+                          child.status,
+                          child.assignee && child.assignee !== 'Unassigned'
+                            ? child.assignee
+                            : tr('filters.unassigned')
+                        ].join(' · ')}
+                        onPress={() => selectTicket(child.id)}
                       />
-                    </List>
-                  </Box>
-                )
-              })}
+                    ))}
+                  </List>
+                ) : (
+                  <Text size="xs" muted>
+                    {tr('detail.noChildren')}
+                  </Text>
+                )}
+                {canCreateSubtask ? (
+                  <Row>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      icon="add"
+                      onPress={() =>
+                        startCreatingSubtask(ticket.projectIdentifier, ticket.id)
+                      }
+                    >
+                      {tr('ticket.addSubtask')}
+                    </Button>
+                  </Row>
+                ) : null}
+              </Stack>
             </Stack>
-          </Box>
-        </Collapsible>
-      ) : null}
-
-      {ticket.description ? (
-        <Stack gap="xs">
-          <Collapsible
-            title={tr('ticket.description')}
-            open={read(descriptionOpenAtom)}
-            onChange={(nextOpen) => set(descriptionOpenAtom, Boolean(nextOpen))}
-          />
-          {read(descriptionOpenAtom) ? (
-            <Box
-              width="100%"
-              minHeight={140}
-              maxHeight={190}
-              scroll="y"
-              border="neutral"
-              background="card"
-              radius="sm"
-              padding="sm"
-            >
-              <Box padding="xs">
-                <Markdown content={ticket.description} />
-              </Box>
-            </Box>
-          ) : null}
-        </Stack>
-      ) : null}
-
-      <Stack gap="sm">
-        <Stack gap="xs">
-          <Text size="xs" weight="medium">
-            {tr('ticket.transitionStatus')}
-          </Text>
-          <Row gap="xs" align="center" wrap>
-            {statusTransitionOptions.map((opt) => {
-              const currentStatus = read(nextStatusDraftAtom) || ticket.status
-              const isSelected =
-                currentStatus.toLowerCase().trim() ===
-                opt.value.toLowerCase().trim()
-              const stStyle = getStatusToneStyle(opt.value, opt.color)
-              return (
-                <Box
-                  key={opt.value}
-                  border={stStyle.border}
-                  background={stStyle.background}
-                  radius="md"
-                >
-                  <Button
-                    size="xs"
-                    variant={isSelected ? 'solid' : 'ghost'}
-                    tone={
-                      isSelected
-                        ? 'accent'
-                        : stStyle.border === 'danger' &&
-                            stStyle.background === 'danger'
-                          ? 'danger'
-                          : 'neutral'
-                    }
-                    onPress={() => set(nextStatusDraftAtom, opt.value)}
-                  >
-                    {opt.label}
-                  </Button>
-                </Box>
-              )
-            })}
-          </Row>
-        </Stack>
-        <Select
-          label={tr('ticket.assignee')}
-          value={assigneeDraft}
-          options={ticketMemberOptions}
-          onChange={(val) => {
-            set(nextAssigneeDraftAtom, val)
-          }}
-        />
-        <Select
-          label={tr('ticket.responsible')}
-          value={responsibleDraft}
-          options={ticketMemberOptions}
-          onChange={(val) => {
-            set(nextResponsibleDraftAtom, val)
-          }}
-        />
-        <Input
-          label={tr('ticket.comment')}
-          value={read(commentDraftAtom)}
-          onChange={(val) => {
-            set(commentDraftAtom, val)
-          }}
-        />
+          </Tab>
+        </Tabs>
       </Stack>
-
-      <Row gap="xs" align="center" wrap>
-        <Button
-          size="xs"
-          tone="accent"
-          onPress={() => confirmTicketUpdate(ticket.id)}
-        >
-          {tr('ticket.update')}
-        </Button>
-      </Row>
-
-      {activities.length > 0 ? (
-        <Collapsible
-          title={tr('ticket.commentsHistory', { count: activities.length })}
-          defaultOpen={false}
-        >
-          <Stack gap="xs">
-            {activities.map((act) => (
-              <Card
-                key={String(act.id)}
-                title={act.user}
-                description={formatShortDate(act.createdAt)}
-              >
-                <Text size="xs">{act.comment}</Text>
-              </Card>
-            ))}
-          </Stack>
-        </Collapsible>
-      ) : null}
-    </Stack>
+    </Box>
   )
 }
