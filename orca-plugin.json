@@ -2,17 +2,18 @@
   "manifestVersion": 2,
   "id": "openproject",
   "name": "OpenProject MCP for Orca",
-  "version": "0.1.4",
-  "description": "Community-built Orca sidebar and Rust MCP integration for OpenProject CE, with guarded ticket writes.",
+  "version": "0.2.0",
+  "description": "Fork of IvanHa-dev/mcp-openproject: an OpenProject CE work package viewer for Orca that turns tickets into workspaces, plus a Rust MCP server with guarded writes.",
   "icon": "assets/icon.png",
   "cover": {
     "path": "assets/cover.png",
     "alt": "Illustration of the OpenProject MCP for Orca ticket panel using synthetic demo tasks"
   },
   "author": {
-    "name": "IvanHa-dev",
-    "url": "https://github.com/IvanHa-dev"
+    "name": "DaNussi",
+    "url": "https://github.com/DaNussi"
   },
+  "repository": "https://github.com/DaNussi/mcp-openproject",
   "license": "MIT",
   "engines": {
     "orca": ">=1.4.274"
