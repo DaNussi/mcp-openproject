@@ -583,11 +583,12 @@ function renderTicket(ticket: OpenProjectWorkPackage): string {
     if (ticket.createdAt) dateRows.push([tr('detail.created'), esc(formatShortDate(ticket.createdAt))])
     body = `
       <div class="section-title">${esc(tr('detail.sectionPeople'))}</div>
-      <dl class="kv"><dt>${esc(tr('ticket.assignee'))}</dt><dd>${person(ticket.assignee)}</dd>
-        <dt>${esc(tr('ticket.responsible'))}</dt><dd>${person(ticket.responsible)}</dd>
-        ${watchers}
-        ${latest ? `<dt>${esc(tr('detail.lastActivity'))}</dt><dd>${esc(latest.user)} <span class="muted">· ${esc(formatShortDate(latest.createdAt))}</span></dd>` : ''}
-      </dl>
+      <div class="kv-cols">
+        <dl class="kv"><dt>${esc(tr('ticket.assignee'))}</dt><dd>${person(ticket.assignee)}</dd>
+          <dt>${esc(tr('ticket.responsible'))}</dt><dd>${person(ticket.responsible)}</dd></dl>
+        ${watchers || latest ? `<dl class="kv">${watchers}
+          ${latest ? `<dt>${esc(tr('detail.lastActivity'))}</dt><dd>${esc(latest.user)} <span class="muted">· ${esc(formatShortDate(latest.createdAt))}</span></dd>` : ''}</dl>` : ''}
+      </div>
       ${dateRows.length ? `<div class="section-title">${esc(tr('detail.sectionDates'))}</div>
       <dl class="kv">${dateRows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>` : ''}
       <div class="section-title">${esc(tr('ticket.description'))}</div>

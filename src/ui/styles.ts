@@ -115,6 +115,9 @@ body.resizing { cursor: row-resize; user-select: none; }
 .subtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--orca-border); }
 .section-title { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--orca-muted-foreground); border-bottom: 1px solid var(--orca-border); padding-bottom: 3px; margin-top: 6px; }
 dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 4px 0 0; }
+.kv-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; align-items: start; }
+.kv-cols > dl.kv { margin: 4px 0 0; }
+@media (max-width: 380px) { .kv-cols { grid-template-columns: 1fr; } }
 dl.kv dt { color: var(--orca-muted-foreground); }
 dl.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .launch { border: 1px solid var(--orca-ring); border-radius: var(--orca-radius); padding: 10px; background: var(--orca-card); display: flex; flex-direction: column; gap: 8px; }
