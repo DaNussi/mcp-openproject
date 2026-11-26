@@ -137,21 +137,9 @@ test('enforces read/write allowlists, 2-step preview-then-confirm, and agent lau
   assert.equal(launched.branchSlug, 'op-1428-fix-token-refresh')
   assert.equal(worker.host.callsOf('agent.launch').length, 1)
 
-  // 5. Verify agent.launch.before hook injects OpenProject MCP env vars
-  const hookDecision = await worker.hooks.fire('agent.launch.before', {
-    agent: 'codex',
-    workspaceId: 'ws-acme-backend',
-    workspaceKind: 'worktree',
-    command: 'codex',
-    env: { EXISTING: '1' }
-  })
-  assert.equal(hookDecision.kind, 'continue')
-  if (hookDecision.kind === 'continue') {
-    assert.equal(hookDecision.event.env.OPENPROJECT_BASE_URL, 'https://openproject.example.com')
-    assert.equal(hookDecision.event.env.OPENPROJECT_API_TOKEN, 'opapi-secret-123')
-    assert.equal(hookDecision.event.env.OPENPROJECT_READ_PROJECTS, 'acme-backend')
-    assert.equal(hookDecision.event.env.OPENPROJECT_WRITE_PROJECTS, 'acme-backend')
-  }
+  // 5. Credentials reach agents through the registered MCP config (no launch hook any more),
+  // so the launch request itself must never carry the API token.
+  assert.ok(!JSON.stringify(worker.host.callsOf('agent.launch')).includes('opapi-secret-123'))
 
   // 6. Verify buildAgentTicketPrompt escapes look-alike <untrusted_ticket_data> closing tags
   const escapedPrompt = buildAgentTicketPrompt(
