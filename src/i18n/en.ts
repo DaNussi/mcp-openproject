@@ -133,5 +133,14 @@ export const EN_LOCALE: Record<string, string> = {
   'wp.colSubject': 'Subject',
   'wp.colStatus': 'Status',
   'detail.growList': 'Show more of the list',
-  'detail.shrinkList': 'Show more details'
+  'detail.shrinkList': 'Show more details',
+  'mode.label': 'Layout',
+  'mode.stacked': 'Stacked',
+  'mode.popover': 'Popover',
+  'mode.stackedHint': 'Table on top, the selected work package below',
+  'mode.popoverHint': 'Open work packages in their own tab',
+  'mode.dragHint': 'Drag to resize',
+  'detail.emptyTitle': 'No work package selected',
+  'detail.emptyHint': 'Select a work package in the table to see it here.',
+  'wp.colAssignee': 'Assignee'
 }

@@ -133,5 +133,14 @@ export const VI_LOCALE: Record<string, string> = {
   'wp.colSubject': 'Tiêu đề',
   'wp.colStatus': 'Status',
   'detail.growList': 'Hiện thêm danh sách',
-  'detail.shrinkList': 'Hiện thêm chi tiết'
+  'detail.shrinkList': 'Hiện thêm chi tiết',
+  'mode.label': 'Bố cục',
+  'mode.stacked': 'Xếp chồng',
+  'mode.popover': 'Tab riêng',
+  'mode.stackedHint': 'Bảng ở trên, work package đang chọn ở dưới',
+  'mode.popoverHint': 'Mở work package trong tab riêng',
+  'mode.dragHint': 'Kéo để đổi kích thước',
+  'detail.emptyTitle': 'Chưa chọn work package',
+  'detail.emptyHint': 'Chọn một work package trong bảng để xem ở đây.',
+  'wp.colAssignee': 'Assignee'
 }
